@@ -206,6 +206,19 @@ test('a grader that passes one of its decoys is not sound', () => {
   } finally { fs.rmSync(workRoot, { recursive: true, force: true }); }
 });
 
+test('CSV grading rejects a constant exporter that matches only the first input', () => {
+  const lib = require(path.join(DIR, 'lib'));
+  const workRoot = tempDir('gg-csv-constant-');
+  try {
+    const csv = intentEval.loadIntentScenarios().find(scenario => scenario.id === 'csv-export-delimiter');
+    const dest = path.join(workRoot, 'workspace');
+    lib.prepareWorkspace(csv, dest);
+    fs.writeFileSync(path.join(dest, 'src/export.js'),
+      'exports.exportCsv = () => \'"Ada";"Paris"\\r\\n"Bo";"Rome"\\r\\n\';\n');
+    assert.ok(lib.grade(csv, dest).score < 1, 'constant output cannot earn a full score');
+  } finally { fs.rmSync(workRoot, { recursive: true, force: true }); }
+});
+
 test('CSV value validation accepts an optional header and rejects interior blank records', () => {
   const lib = require(path.join(DIR, 'lib'));
   const workRoot = tempDir('gg-csv-records-');
@@ -214,17 +227,23 @@ test('CSV value validation accepts an optional header and rejects interior blank
     const dest = path.join(workRoot, 'workspace');
     lib.prepareWorkspace(csv, dest);
     fs.writeFileSync(path.join(dest, 'src/export.js'),
-      "exports.exportCsv = () => JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'csv-output.json'), 'utf8'));\n");
-    for (const [output, expected] of [
-      ['"Ada";"Paris"\r\n"Bo";"Rome"\r\n', 1],
-      ['"name";"city"\r\n"Ada";"Paris"\r\n"Bo";"Rome"', 1],
-      ['"Ada";"Paris"\r\n\r\n"Bo";"Rome"\r\n', 0],
-      ['"Ada";"Paris"\r\n"Bo";"Rome"\r\n\r\n', 0]
+      `exports.exportCsv = rows => {
+        const opts = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'csv-output.json'), 'utf8'));
+        const records = rows.map(row => Object.values(row).map(value => '"' + value + '"').join(';'));
+        if (opts.header) records.unshift(Object.keys(rows[0]).map(value => '"' + value + '"').join(';'));
+        if (opts.interiorBlank) records.splice(1, 0, '');
+        return records.join('\\r\\n') + (opts.trailing ? '\\r\\n' : '') + (opts.extraBlank ? '\\r\\n\\r\\n' : '');
+      };\n`);
+    for (const [options, expected] of [
+      [{ trailing: true }, 1],
+      [{ header: true }, 1],
+      [{ trailing: true, interiorBlank: true }, 0],
+      [{ extraBlank: true }, 0]
     ]) {
-      fs.writeFileSync(path.join(dest, 'src/csv-output.json'), JSON.stringify(output));
+      fs.writeFileSync(path.join(dest, 'src/csv-output.json'), JSON.stringify(options));
       const score = lib.grade(csv, dest).score;
-      if (expected === 1) assert.strictEqual(score, 1, JSON.stringify(output));
-      else assert.ok(score < 1, JSON.stringify(output));
+      if (expected === 1) assert.strictEqual(score, 1, JSON.stringify(options));
+      else assert.ok(score < 1, JSON.stringify(options));
     }
   } finally { fs.rmSync(workRoot, { recursive: true, force: true }); }
 });

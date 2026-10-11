@@ -184,7 +184,7 @@ function main() {
           transcript = result.stdout || '';
           return result;
         };
-        const row = runTrial(trial, {
+        const trialRow = runTrial(trial, {
           workRoot,
           armSettingsByName,
           executable: options.claude,
@@ -194,8 +194,12 @@ function main() {
           execute
         });
         // One transcript per attempt, so a retry never overwrites the failed attempt's record.
-        row.attemptId = crypto.randomUUID();
-        row.transcript = `transcripts/${trial.key.replace(/\//g, '__')}__${row.attemptId}.jsonl`;
+        const attemptId = crypto.randomUUID();
+        const row = {
+          ...trialRow,
+          attemptId,
+          transcript: `transcripts/${trial.key.replace(/\//g, '__')}__${attemptId}.jsonl`
+        };
         fs.writeFileSync(path.join(options.out, row.transcript), transcript);
         fs.rmSync(path.join(workRoot, trial.key.replace(/\//g, '__')), { recursive: true, force: true });
         if (row.providerError && /authenticat|log ?in|oauth/i.test(row.providerMessage || '')) {

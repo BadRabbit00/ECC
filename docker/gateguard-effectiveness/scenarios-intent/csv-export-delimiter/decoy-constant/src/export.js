@@ -2,7 +2,7 @@
 
 /** Decoy: a constant in the right dialect that ignores its input. */
 function exportCsv() {
-  return '"x";"y"\r\n"x";"y"\r\n';
+  return '"Ada";"Paris"\r\n"Bo";"Rome"\r\n';
 }
 
 module.exports = { exportCsv };

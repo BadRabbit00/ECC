@@ -45,11 +45,16 @@ class TestParseClassification:
         with pytest.raises(classifier.ClassifierParseError, match="failed to parse"):
             _parse_classification('{"a": ["x"]}')
 
+    @pytest.mark.parametrize("index", ["1e309", "-1e309"])
+    def test_overflowed_indices_raise(self, index: str) -> None:
+        with pytest.raises(classifier.ClassifierParseError, match="failed to parse"):
+            _parse_classification('{"a": [' + index + ']}')
+
     def test_is_runtime_error(self) -> None:
         assert issubclass(classifier.ClassifierParseError, RuntimeError)
 
 
-@pytest.mark.parametrize("response", ["not JSON", "[]", '{"a": ["x"]}', '{"a": "x"}', '{"a": [0], "other": null}'])
+@pytest.mark.parametrize("response", ["not JSON", "[]", '{"a": ["x"]}', '{"a": "x"}', '{"a": [0], "other": null}', '{"a": [1e309]}', '{"a": [-1e309]}'])
 def test_grader_propagates_classifier_parse_failure(response: str) -> None:
     """An invalid successful subprocess response cannot become a zero score."""
     spec = ComplianceSpec(

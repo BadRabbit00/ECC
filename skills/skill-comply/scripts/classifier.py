@@ -86,7 +86,7 @@ def _parse_classification(text: str) -> dict[str, list[int]]:
                     f"classifier returned non-list JSON value: {type(value).__name__}"
                 )
         return {k: [int(i) for i in v] for k, v in parsed.items()}
-    except (json.JSONDecodeError, ValueError, TypeError) as e:
+    except (json.JSONDecodeError, ValueError, TypeError, OverflowError) as e:
         raise ClassifierParseError(
             f"failed to parse classification output: {e}"
         ) from e
