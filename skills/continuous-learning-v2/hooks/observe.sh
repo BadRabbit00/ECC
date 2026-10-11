@@ -123,6 +123,15 @@ if [ -n "$STDIN_CWD" ] && [ -d "$STDIN_CWD" ]; then
     unset CLAUDE_PROJECT_DIR
     export CLV2_NO_PROJECT=1
   fi
+else
+  # Payload cwd is missing or not a directory. Do not let detect-project.sh
+  # priority 2 guess from the hook's inherited working directory. Keep a
+  # valid inherited CLAUDE_PROJECT_DIR (explicit override, including non-git
+  # directories). Otherwise force the global bucket.
+  if [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ! -d "${CLAUDE_PROJECT_DIR:-}" ]; then
+    unset CLAUDE_PROJECT_DIR
+    export CLV2_NO_PROJECT=1
+  fi
 fi
 
 # ─────────────────────────────────────────────
