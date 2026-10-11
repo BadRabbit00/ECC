@@ -158,6 +158,41 @@ test('custom config disabled marker stops capture without touching either bucket
   assert.ok(!fs.existsSync(path.join(f.data, '.observer-last-activity')));
 });
 
+test('valid explicit project clears inherited global-scope marker', root => {
+  const f = fixture(root);
+  run(f, payload, { CLAUDE_PROJECT_DIR: f.subdir, CLV2_NO_PROJECT: '1' });
+  preserved(f, { registryUpdate: true });
+  const entries = Object.values(JSON.parse(fs.readFileSync(path.join(f.data, 'projects.json'))))
+    .filter(entry => entry.root);
+  assert.equal(entries.length, 1);
+  assert.equal(fs.realpathSync(entries[0].root), fs.realpathSync(f.explicit));
+  const stored = fs.readFileSync(path.join(f.data, 'projects', entries[0].id, 'observations.jsonl'), 'utf8');
+  assert.equal(JSON.parse(stored).project_id, entries[0].id);
+});
+
+// Root bypasses mode bits, so this permission fixture requires an ordinary user.
+if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  console.log('SKIP: inaccessible explicit directory fixture requires an ordinary user');
+} else test('inaccessible explicit directory selects global instead of inherited git scope', root => {
+  const f = fixture(root);
+  const inaccessible = path.join(root, 'inaccessible');
+  fs.mkdirSync(inaccessible);
+  fs.chmodSync(inaccessible, 0);
+  try {
+    const probe = spawnSync('bash', ['-c', 'cd "$CLAUDE_PROJECT_DIR"'], {
+      env: { ...f.env, CLAUDE_PROJECT_DIR: inaccessible }, encoding: 'utf8' });
+    assert.notEqual(probe.status, 0, 'fixture must actually prevent directory entry');
+    run(f, payload, { CLAUDE_PROJECT_DIR: inaccessible });
+    preserved(f, { globalAppend: true });
+    const rows = fs.readFileSync(path.join(f.data, 'observations.jsonl'), 'utf8').trim().split('\n');
+    assert.equal(rows.length, 2);
+    assert.equal(JSON.parse(rows[1]).project_id, 'global');
+    assert.deepEqual(fs.readdirSync(path.join(f.data, 'projects')), ['user-owned']);
+  } finally {
+    fs.chmodSync(inaccessible, 0o700);
+  }
+});
+
 for (const [label, extraEnv, input, disabled, registered] of [
   ['empty stdin', {}, '', false, false],
   ['capture skip', { ECC_SKIP_OBSERVE: '1' }, payload, false, false],
