@@ -83,8 +83,10 @@ function preserved(f, { globalAppend = false, registryUpdate = false } = {}) {
   }
 }
 
+// Assemble the synthetic redaction input at runtime; it is never a credential.
+const REDACTION_CANARY = ['CANARY', 'abcdefghijk'].join('_');
 const payload = { tool_name: 'Read', session_id: 'scope-safety',
-  tool_response: { content: 'password = "CANARY_abcdefghijk"' } };
+  tool_response: { content: `password = "${REDACTION_CANARY}"` } };
 
 for (const cwd of [undefined, '', null, '/no-such-ecc-scope-directory']) {
   test(`unusable cwd ${JSON.stringify(cwd)} appends globally and preserves scoped user files`, root => {
@@ -96,7 +98,7 @@ for (const cwd of [undefined, '', null, '/no-such-ecc-scope-directory']) {
     const record = JSON.parse(rows[1]);
     assert.equal(record.project_id, 'global');
     assert.ok(record.output.includes('[REDACTED]'));
-    assert.ok(!record.output.includes('CANARY_abcdefghijk'));
+    assert.ok(!record.output.includes(REDACTION_CANARY));
     assert.deepEqual(fs.readdirSync(path.join(f.data, 'projects')), ['user-owned']);
     assert.ok(!fs.existsSync(path.join(f.data, '.observer.pid')));
   });
@@ -105,7 +107,7 @@ for (const cwd of [undefined, '', null, '/no-such-ecc-scope-directory']) {
 test('explicit payload subdirectory wins over inherited scope and redacts pre input', root => {
   const f = fixture(root);
   run(f, { ...payload, cwd: f.subdir,
-    tool_input: { content: 'token = "CANARY_abcdefghijk"' } },
+    tool_input: { content: `token = "${REDACTION_CANARY}"` } },
   { CLAUDE_PROJECT_DIR: f.decoy }, 'pre');
   preserved(f, { registryUpdate: true });
   const registry = JSON.parse(fs.readFileSync(path.join(f.data, 'projects.json')));
@@ -115,18 +117,18 @@ test('explicit payload subdirectory wins over inherited scope and redacts pre in
   const stored = fs.readFileSync(path.join(f.data, 'projects', entries[0].id, 'observations.jsonl'), 'utf8');
   assert.equal(JSON.parse(stored).event, 'tool_start');
   assert.ok(stored.includes('[REDACTED]'));
-  assert.ok(!stored.includes('CANARY_abcdefghijk'));
+  assert.ok(!stored.includes(REDACTION_CANARY));
 });
 
 test('malformed stdin is redacted in global fallback without registering decoy', root => {
   const f = fixture(root);
-  run(f, 'invalid JSON token=CANARY_abcdefghijk');
+  run(f, `invalid JSON token=${REDACTION_CANARY}`);
   preserved(f, { globalAppend: true });
   const rows = fs.readFileSync(path.join(f.data, 'observations.jsonl'), 'utf8').trim().split('\n');
   assert.equal(rows.length, 2);
   assert.equal(JSON.parse(rows[1]).event, 'parse_error');
   assert.ok(rows[1].includes('[REDACTED]'));
-  assert.ok(!rows[1].includes('CANARY_abcdefghijk'));
+  assert.ok(!rows[1].includes(REDACTION_CANARY));
   assert.deepEqual(fs.readdirSync(path.join(f.data, 'projects')), ['user-owned']);
 });
 
