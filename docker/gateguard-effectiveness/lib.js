@@ -305,7 +305,11 @@ function runTrial(trial, { workRoot, armSettingsByName, executable, model, maxTu
     exitStatus: run.status,
     timedOut: Boolean(run.error && run.error.code === 'ETIMEDOUT'),
     providerError: !stream.result || stream.result.is_error === true,
-    providerMessage: stream.result && stream.result.is_error === true ? String(stream.result.result || '').slice(0, 200) : null,
+    providerMessage: stream.result && stream.result.is_error === true
+      ? String(stream.result.result || '').slice(0, 200)
+      : !stream.result
+        ? String(stream.texts[stream.texts.length - 1] || '').slice(0, 200) || null
+        : null,
     wallMs: Date.now() - started,
     passed: outcome.passed,
     score: outcome.score,

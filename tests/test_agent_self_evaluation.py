@@ -122,11 +122,11 @@ def test_task_read_does_not_hide_other_file_errors(evaluator: ModuleType, monkey
 
 
 @pytest.fixture(params=[SCRIPT, PI_SCRIPT], ids=["canonical", "pi"])
-def evaluator(request: pytest.FixtureRequest) -> ModuleType:
+def evaluator(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     spec = importlib.util.spec_from_file_location("task_input_evaluator", request.param)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
+    monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
     return module
 

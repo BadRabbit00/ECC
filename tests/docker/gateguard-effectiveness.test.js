@@ -339,14 +339,16 @@ test('pilot summaries count valid trials only and report provider errors apart',
 });
 
 /** The pilot runner driven end to end with fake-claude.js as the provider. */
-function syntheticPilotRunner(root, scenario, arms) {
+function syntheticPilotRunner(root, scenario, arms, streamEvents = null) {
   const out = path.join(root, 'out');
   const preload = path.join(root, 'preload.js');
   fs.writeFileSync(preload, `
     const cp = require('child_process');
     const originalSpawn = cp.spawnSync;
     cp.spawnSync = (file, args, options) => file === 'ecc-fake-claude'
-      ? originalSpawn(process.execPath, [${JSON.stringify(path.join(DIR, 'fake-claude.js'))}, ...args], options)
+      ? ${streamEvents === null
+        ? `originalSpawn(process.execPath, [${JSON.stringify(path.join(DIR, 'fake-claude.js'))}, ...args], options)`
+        : JSON.stringify({ status: 0, stdout: streamEvents.map(event => JSON.stringify(event)).join('\n') + '\n', stderr: '' })}
       : originalSpawn(file, args, options);
   `);
   const args = ['--require', preload, path.join(DIR, 'run.js'), '--out', out, '--model', 'fake', '--claude', 'ecc-fake-claude', '--allow-real-provider', '--arms', arms, '--reps', '1', '--scenarios', scenario.id];
@@ -380,6 +382,57 @@ if (gitAvailable()) {
       assert.deepStrictEqual([off.trials, off.passes, off.providerErrors], [1, 1, 1]);
       const again = run({});
       assert.ok(again.stderr.includes('0 trials to run'), again.stderr);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('assistant-only authentication failures retain transcripts and abort before pilot rows', () => {
+    for (const text of ['Not logged in - Please run /login', 'Authentication failed: OAuth token expired']) {
+      const root = tempDir('gg-eff-auth-');
+      try {
+        const scenario = scenarios.find(item => item.id === 'importers-date-shape');
+        const events = [{ type: 'assistant', message: { content: [{ type: 'text', text: 'Preparing' }, { type: 'text', text }] } }];
+        const { out, run, results } = syntheticPilotRunner(root, scenario, 'off', events);
+        const auth = run({});
+        assert.strictEqual(auth.status, 2, auth.stderr);
+        assert.match(auth.stderr, /not signed in/);
+        assert.deepStrictEqual(results(), [], 'authentication is not recorded as a completed or failed trial row');
+        const files = fs.readdirSync(path.join(out, 'transcripts'));
+        assert.strictEqual(files.length, 1);
+        const retained = fs.readFileSync(path.join(out, 'transcripts', files[0]), 'utf8');
+        assert.ok(retained.includes(text));
+        assert.ok(!fs.existsSync(path.join(out, '.run.lock')));
+        const resumed = syntheticPilotRunner(root, scenario, 'off').run({});
+        assert.strictEqual(resumed.status, 0, resumed.stderr);
+        assert.strictEqual(results().length, 1);
+        assert.strictEqual(results()[0].providerError, false);
+        assert.strictEqual(fs.readdirSync(path.join(out, 'transcripts')).length, 2);
+        assert.strictEqual(fs.readFileSync(path.join(out, 'transcripts', files[0]), 'utf8'), retained);
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    }
+  });
+
+  test('missing-result messages preserve ordinary failures, empty text and result mapping', () => {
+    const root = tempDir('gg-eff-messages-');
+    try {
+      const scenario = scenarios.find(item => item.id === 'importers-date-shape');
+      const text = value => ({ type: 'assistant', message: { content: [{ type: 'text', text: value }] } });
+      const cases = [
+        [[text('Provider connection closed')], true, 'Provider connection closed'],
+        [[text('old'), text('')], true, null],
+        [[], true, null],
+        [[text('x'.repeat(250))], true, 'x'.repeat(200)],
+        [[text('Not logged in'), { type: 'result', is_error: false, result: 'Done' }], false, null],
+        [[text('Ignored'), { type: 'result', is_error: true, result: 'Result error' }], true, 'Result error']
+      ];
+      for (const [events, error, message] of cases) {
+        const row = lib.runTrial({ key: 'mapping/off/1', scenario, arm: 'off', rep: 1 }, {
+          workRoot: root, armSettingsByName: { off: arms.armSettings(null) }, executable: 'controlled',
+          model: 'fake', maxTurns: 1, timeoutMs: 1000,
+          execute: () => ({ status: 0, stdout: events.map(event => JSON.stringify(event)).join('\n'), stderr: '' })
+        });
+        assert.strictEqual(row.providerError, error);
+        assert.strictEqual(row.providerMessage, message);
+      }
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
