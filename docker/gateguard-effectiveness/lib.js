@@ -227,6 +227,13 @@ function parseStream(stdout) {
   return parsed;
 }
 
+/** Recognize sign-in failure diagnostics, not ordinary authentication discussion. */
+function isAuthenticationFailure(message) {
+  if (typeof message !== 'string') return false;
+  return /^\s*(?:(?:API\s+)?Error:\s*)?(?:Not\s+(?:logged|signed)\s+in|Authentication\s+(?:is\s+)?(?:failed|required)|OAuth(?:\s+(?:token|authentication))?\s+(?:failed|expired|invalid|required)|(?:Login|Sign-in)\s+(?:failed|required)|Invalid\s+API\s+key)(?=\s*(?:$|[.:;!()\u00b7-])|[\r\n])/i.test(message)
+    || /^\s*(?:Please|Must)\s+(?:run\s+\/login|log\s+in|sign\s+in)\b/i.test(message);
+}
+
 function readMetrics(stateDir) {
   const file = path.join(stateDir, 'metrics.jsonl');
   if (!fs.existsSync(file)) return [];
@@ -461,6 +468,7 @@ module.exports = {
   childEnv,
   claudeArgs,
   parseStream,
+  isAuthenticationFailure,
   readMetrics,
   hookWasObserved,
   evidenceRecall,

@@ -317,6 +317,24 @@ if (gnuTarDir) {
   });
 }
 
+test('authentication abort recognizes failure diagnostics rather than ordinary discussion', () => {
+  const failures = [
+    'Not logged in - Please run /login', 'Authentication failed: OAuth token expired',
+    'OAuth authentication failed', 'OAuth token expired; sign in again',
+    'Authentication is required', 'Login failed', 'Error: Not signed in.',
+    'Invalid API key · Please run /login', 'Please run /login', 'Must sign in'
+  ];
+  const ordinary = [
+    'Payment API key authentication uses the Authorization header.',
+    'OAuth tokens authorize payment API requests.', 'Login routes use OAuth.',
+    'Authentication uses a bearer token.', 'How to use OAuth login',
+    'Please explain login flows', 'Authentication failed examples belong in docs',
+    'Not logged in errors are covered in tests', '', null
+  ];
+  for (const text of failures) assert.strictEqual(lib.isAuthenticationFailure(text), true, text);
+  for (const text of ordinary) assert.strictEqual(lib.isAuthenticationFailure(text), false, String(text));
+});
+
 test('pilot summaries count valid trials only and report provider errors apart', () => {
   const row = (arm, rep, passed, extra = {}) => ({
     key: `s/${arm}/${rep}`, arm, scenario: 's', rep, question: 'q', passed, score: passed ? 1 : 0, evidenceRecall: 0, gateDenials: 0,
@@ -440,6 +458,24 @@ if (gitAvailable()) {
         assert.strictEqual(row.providerMessage, message);
       }
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('ordinary authentication discussion remains a failed-attempt row on missing result', () => {
+    for (const text of ['Payment API key authentication uses the Authorization header.', 'OAuth tokens authorize payment API requests.']) {
+      const root = tempDir('gg-eff-auth-discussion-');
+      try {
+        const scenario = scenarios.find(item => item.id === 'importers-date-shape');
+        const events = [{ type: 'assistant', message: { content: [{ type: 'text', text }] } }];
+        const { out, run, results } = syntheticPilotRunner(root, scenario, 'off', events);
+        const result = run({});
+        assert.strictEqual(result.status, 0, result.stderr);
+        assert.strictEqual(results().length, 1);
+        assert.strictEqual(results()[0].providerError, true);
+        assert.strictEqual(results()[0].providerMessage, text);
+        assert.strictEqual(fs.readdirSync(path.join(out, 'transcripts')).length, 1);
+        assert.ok(!fs.existsSync(path.join(out, '.run.lock')));
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    }
   });
 
   test('the pilot runner stops before recording a gated trial whose hook never ran', () => {

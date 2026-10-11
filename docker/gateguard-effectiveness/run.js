@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { ARMS, DEFAULT_ARMS, resolveRef, materializeTree, armSettings } = require('./arms');
-const { loadScenarios, schedule, runTrial, summarize, renderMarkdown, completedTrialKeys } = require('./lib');
+const { loadScenarios, schedule, runTrial, summarize, renderMarkdown, completedTrialKeys, isAuthenticationFailure } = require('./lib');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 
@@ -202,7 +202,7 @@ function main() {
         };
         fs.writeFileSync(path.join(options.out, row.transcript), transcript);
         fs.rmSync(path.join(workRoot, trial.key.replace(/\//g, '__')), { recursive: true, force: true });
-        if (row.providerError && /authenticat|log ?in|oauth/i.test(row.providerMessage || '')) {
+        if (row.providerError && isAuthenticationFailure(row.providerMessage)) {
           throw new Error(`${trial.key}: Claude is not signed in (${row.providerMessage}); sign in with the claude CLI and rerun with the same --out`);
         }
         if (!row.hookObserved) throw new Error(`${trial.key}: the gate did not run although the agent edited files; check the hook setup before spending more sessions`);

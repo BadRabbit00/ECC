@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { schedule, completedTrialKeys } = require('./lib');
+const { schedule, completedTrialKeys, isAuthenticationFailure } = require('./lib');
 const { ARMS, armSettings, resolveRef, materializeTree } = require('./arms');
 const { loadIntentScenarios, graderIsSound, formatGraderScores, runIntentTrial, SUPPORTED_ARMS } = require('./intent-eval');
 const { renderHoles, difficulty, isValidTrial } = require('./coverage');
@@ -356,7 +356,7 @@ function main() {
       fs.rmSync(path.join(workRoot, trial.key.replace(/\//g, '__')), { recursive: true, force: true });
       // An unauthenticated or hookless run must not be recorded: graded as data it
       // looks like a finding (the first such trial was filed as a coverage hole).
-      if (row.providerError && /authenticat|log ?in|oauth/i.test(row.providerMessage || '')) {
+      if (row.providerError && isAuthenticationFailure(row.providerMessage)) {
         throw new Error(`${trial.key}: Claude is not signed in (${row.providerMessage}); sign in with the claude CLI and rerun with the same --out`);
       }
       if (!row.hookObserved) {
