@@ -308,7 +308,7 @@ function runTrial(trial, { workRoot, armSettingsByName, executable, model, maxTu
     providerMessage: stream.result && stream.result.is_error === true
       ? String(stream.result.result || '').slice(0, 200)
       : !stream.result
-        ? String(stream.texts[stream.texts.length - 1] || '').slice(0, 200) || null
+        ? String([...stream.texts].reverse().find(text => text.trim() !== '') || '').slice(0, 200) || null
         : null,
     wallMs: Date.now() - started,
     passed: outcome.passed,

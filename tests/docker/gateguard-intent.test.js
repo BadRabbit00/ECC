@@ -741,6 +741,26 @@ test('a missing or errored result is a provider error, not a trial', () => {
   assert.match(result.providerMessage, /log ?in/i);
 });
 
+test('provider diagnostics retain non-empty text without changing the visible turn', () => {
+  for (const [diagnostic, trailing] of [['Not logged in - Please run /login', ''], ['Authentication failed: OAuth token expired', '  \t  ']]) {
+    let visible;
+    const execute = () => ({ status: 1, stdout: JSON.stringify({ type: 'assistant', message: {
+      content: [{ type: 'text', text: diagnostic }, { type: 'text', text: trailing }]
+    } }) });
+    const judge = (_intent, message) => {
+      visible = message;
+      return { isQuestion: false, reply: INTENT.stonewall, disclosed: [], judgeFailed: false };
+    };
+    const result = session.runConversation(
+      { cwd: '.', stateDir: '.', settingsPath: 's', prompt: 'p', intent: INTENT },
+      { model: 'm', maxTurns: 5, timeoutMs: 1000, userTurns: 1, execute, judge }
+    );
+    assert.strictEqual(result.providerError, true);
+    assert.strictEqual(result.providerMessage, diagnostic);
+    assert.strictEqual(visible, trailing, 'provider diagnostic fallback does not rewrite conversation text');
+  }
+});
+
 test('denials are recorded per turn, so the once-per-session latch is visible', () => {
   let call = 0;
   const execute = () => {

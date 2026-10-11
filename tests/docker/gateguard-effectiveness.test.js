@@ -386,11 +386,15 @@ if (gitAvailable()) {
   });
 
   test('assistant-only authentication failures retain transcripts and abort before pilot rows', () => {
-    for (const text of ['Not logged in - Please run /login', 'Authentication failed: OAuth token expired']) {
+    for (const [text, trailing] of [
+      ['Not logged in - Please run /login', null], ['Authentication failed: OAuth token expired', null],
+      ['Not logged in - Please run /login', ''], ['Authentication failed: OAuth token expired', '  \t  ']
+    ]) {
       const root = tempDir('gg-eff-auth-');
       try {
         const scenario = scenarios.find(item => item.id === 'importers-date-shape');
         const events = [{ type: 'assistant', message: { content: [{ type: 'text', text: 'Preparing' }, { type: 'text', text }] } }];
+        if (trailing !== null) events.push({ type: 'assistant', message: { content: [{ type: 'text', text: trailing }] } });
         const { out, run, results } = syntheticPilotRunner(root, scenario, 'off', events);
         const auth = run({});
         assert.strictEqual(auth.status, 2, auth.stderr);
@@ -418,8 +422,10 @@ if (gitAvailable()) {
       const text = value => ({ type: 'assistant', message: { content: [{ type: 'text', text: value }] } });
       const cases = [
         [[text('Provider connection closed')], true, 'Provider connection closed'],
-        [[text('old'), text('')], true, null],
+        [[text('old'), text('')], true, 'old'],
         [[], true, null],
+        [[text('  \t  ')], true, null],
+        [[text('old'), text('   '), text('Latest diagnostic'), text('')], true, 'Latest diagnostic'],
         [[text('x'.repeat(250))], true, 'x'.repeat(200)],
         [[text('Not logged in'), { type: 'result', is_error: false, result: 'Done' }], false, null],
         [[text('Ignored'), { type: 'result', is_error: true, result: 'Result error' }], true, 'Result error']
