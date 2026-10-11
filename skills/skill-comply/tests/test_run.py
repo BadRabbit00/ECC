@@ -38,6 +38,7 @@ def cli(monkeypatch, tmp_path):
 def test_classifier_failure_exits_without_report_or_raw_output(
     cli, monkeypatch, caplog, failure_index
 ):
+    caplog.set_level("INFO")
     error = ClassifierParseError("raw-classifier-private-marker")
     results = [SimpleNamespace(compliance_rate=1.0)] * failure_index + [error]
     monkeypatch.setattr(run, "grade", Mock(side_effect=results))
