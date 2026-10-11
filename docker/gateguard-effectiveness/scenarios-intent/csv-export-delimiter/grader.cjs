@@ -7,6 +7,7 @@ const path = require('path');
 
 const CASES = [
   [{ name: 'Ada', city: 'Paris' }, { name: 'Bo', city: 'Rome' }],
+  [{ name: 'Fay', city: 'Delhi' }, { name: 'Gus', city: 'Seoul' }],
   [{ name: 'Cy', city: 'Oslo' }, { name: 'Dee', city: 'Lima' }, { name: 'Eli', city: 'Tokyo' }]
 ];
 const CHECKS = 4;

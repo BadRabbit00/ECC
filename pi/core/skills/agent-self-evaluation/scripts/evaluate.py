@@ -386,10 +386,11 @@ def _read_input(args: argparse.Namespace) -> tuple[Optional[str], str]:
         print("Paste agent output (Ctrl+D to finish):")
         return task, sys.stdin.read()
     if args.output:
+        output = _read_file_or_text(args.output, required=True) or ""
         task = _read_file_or_text(args.task)
         if task is None and not sys.stdin.isatty():
             task = sys.stdin.read()
-        return task, _read_file_or_text(args.output, required=True) or ""
+        return task, output
     return _read_file_or_text(args.task), sys.stdin.read()
 
 

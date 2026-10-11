@@ -50,7 +50,9 @@ class TestSafeSandboxDirectory:
     def test_valid_id_keeps_existing_sanitization(self) -> None:
         assert _safe_sandbox_dir("scenario/one") == SANDBOX_BASE / "scenario_one"
 
-    def test_resolved_escape_is_still_rejected(self, tmp_path, monkeypatch) -> None:
+    def test_resolved_escape_is_still_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         base = tmp_path / "sandbox"
         monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
         with patch.object(Path, "resolve", side_effect=[tmp_path / "outside", base]):

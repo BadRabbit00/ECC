@@ -72,6 +72,22 @@ def test_missing_output_file_still_fails(evaluator: ModuleType, tmp_path: Path, 
     assert "not found" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("output_kind", ["missing", "directory"])
+def test_invalid_output_is_rejected_before_reading_pipe(
+    evaluator: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output_kind: str
+) -> None:
+    output = tmp_path / "output.txt"
+    if output_kind == "directory":
+        output.mkdir()
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(
+        isatty=lambda: False,
+        read=lambda: pytest.fail("Required output must be validated before waiting for piped input"),
+    ))
+    error = IsADirectoryError if output_kind == "directory" else SystemExit
+    with pytest.raises(error):
+        evaluator._read_input(args(output=str(output)))
+
+
 def test_cli_uses_piped_task_for_conciseness_score(evaluator: ModuleType, tmp_path: Path) -> None:
     output = tmp_path / "response.txt"
     output.write_text("Verified with tests. " * 25, encoding="utf-8")

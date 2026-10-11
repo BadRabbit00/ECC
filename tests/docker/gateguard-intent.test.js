@@ -219,6 +219,21 @@ test('CSV grading rejects a constant exporter that matches only the first input'
   } finally { fs.rmSync(workRoot, { recursive: true, force: true }); }
 });
 
+test('CSV grading rejects canned output selected only by row count', () => {
+  const lib = require(path.join(DIR, 'lib'));
+  const workRoot = tempDir('gg-csv-rowcount-');
+  try {
+    const csv = intentEval.loadIntentScenarios().find(scenario => scenario.id === 'csv-export-delimiter');
+    const dest = path.join(workRoot, 'workspace');
+    lib.prepareWorkspace(csv, dest);
+    fs.writeFileSync(path.join(dest, 'src/export.js'),
+      `exports.exportCsv = rows => rows.length === 2
+        ? '"Ada";"Paris"\\r\\n"Bo";"Rome"\\r\\n'
+        : '"Cy";"Oslo"\\r\\n"Dee";"Lima"\\r\\n"Eli";"Tokyo"\\r\\n';\n`);
+    assert.ok(lib.grade(csv, dest).score < 1, 'row count alone cannot earn a full score');
+  } finally { fs.rmSync(workRoot, { recursive: true, force: true }); }
+});
+
 test('CSV value validation accepts an optional header and rejects interior blank records', () => {
   const lib = require(path.join(DIR, 'lib'));
   const workRoot = tempDir('gg-csv-records-');
@@ -636,6 +651,20 @@ function syntheticIntentRunner(root, { fakeEnv = {}, arms = 'off,gate' } = {}) {
   return { copied, out, calls, config, scenario, run };
 }
 
+// These roots are private mkdtemp fixtures. Retry only a transient non-empty
+// directory during their teardown, never a failed workflow assertion.
+function removeOwnedRunnerFixture(root) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error.code !== 'ENOTEMPTY' || attempt === 3) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
+}
+
 test('actual runner stops before recording a gated trial whose hook never ran', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gg-intent-hookless-'));
   try {
@@ -647,7 +676,7 @@ test('actual runner stops before recording a gated trial whose hook never ran', 
     const resultsFile = path.join(out, 'results.jsonl');
     const recorded = fs.existsSync(resultsFile) ? fs.readFileSync(resultsFile, 'utf8').trim().split('\n').filter(Boolean) : [];
     assert.deepStrictEqual(recorded.map(line => JSON.parse(line).arm).filter(arm => arm === 'gate'), [], 'the hookless trial is not recorded as data');
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  } finally { removeOwnedRunnerFixture(root); }
 });
 
 test('actual runner freezes arm-patch source and refuses changed-input resume before dispatch', () => {
@@ -672,7 +701,7 @@ test('actual runner freezes arm-patch source and refuses changed-input resume be
     assert.match(changed.stderr, /different experiment configuration/);
     assert.strictEqual(fs.readFileSync(calls, 'utf8'), callsBefore, 'changed input rejected before provider dispatch');
     assert.strictEqual(fs.readFileSync(path.join(out, 'results.jsonl'), 'utf8'), results);
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  } finally { removeOwnedRunnerFixture(root); }
 });
 
 test('the config directory is never isolated, because that hides the credentials', () => {
