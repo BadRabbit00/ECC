@@ -13,7 +13,9 @@ FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 @pytest.fixture
-def cli(monkeypatch, tmp_path):
+def cli(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> SimpleNamespace:
     skill = tmp_path / "fixture.md"
     skill.write_text("Read a file before editing it.\n")
     output = tmp_path / "report.md"
@@ -36,8 +38,11 @@ def cli(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("failure_index", [0, 1])
 def test_classifier_failure_exits_without_report_or_raw_output(
-    cli, monkeypatch, caplog, failure_index
-):
+    cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure_index: int,
+) -> None:
     caplog.set_level("INFO")
     error = ClassifierParseError("raw-classifier-private-marker")
     results = [SimpleNamespace(compliance_rate=1.0)] * failure_index + [error]
@@ -62,7 +67,11 @@ def test_classifier_failure_exits_without_report_or_raw_output(
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, ValueError, OSError])
-def test_unrelated_grading_exception_propagates(cli, monkeypatch, error_type):
+def test_unrelated_grading_exception_propagates(
+    cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
+) -> None:
     error = error_type("unrelated failure")
     monkeypatch.setattr(run, "grade", Mock(side_effect=error))
 
@@ -74,7 +83,7 @@ def test_unrelated_grading_exception_propagates(cli, monkeypatch, error_type):
     cli.report.assert_not_called()
 
 
-def test_classifier_error_outside_grading_propagates(cli):
+def test_classifier_error_outside_grading_propagates(cli: SimpleNamespace) -> None:
     error = ClassifierParseError("execution failure")
     cli.execute.side_effect = error
 
@@ -85,7 +94,11 @@ def test_classifier_error_outside_grading_propagates(cli):
     cli.report.assert_not_called()
 
 
-def test_valid_positive_grading_writes_report(cli, monkeypatch, caplog):
+def test_valid_positive_grading_writes_report(
+    cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     monkeypatch.setattr(run, "grade", Mock(return_value=SimpleNamespace(compliance_rate=1.0)))
     caplog.set_level("INFO")
 
