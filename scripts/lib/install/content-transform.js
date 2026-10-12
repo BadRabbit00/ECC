@@ -9,8 +9,11 @@ function rewriteCopilotWorkflowPaths(content, sourceRelativePath) {
   if (!/\.md$/i.test(sourceRelativePath)) return content;
   // Commands run from the installed project root. Rewrite only the supported
   // helper entrypoint, leaving unrelated project scripts and URLs untouched.
-  return content.replace(/(^|[\s`"'(])scripts\/setup-package-manager\.js\b/g,
-    '$1.github/ecc/scripts/setup-package-manager.js');
+  return content
+    .replace(/(^|[\s`"'(])\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/setup-package-manager\.js\b/g,
+      '$1.github/ecc/scripts/setup-package-manager.js')
+    .replace(/(^|[\s`"'(])scripts\/setup-package-manager\.js\b/g,
+      '$1.github/ecc/scripts/setup-package-manager.js');
 }
 
 function transformInstallContent(operation, content) {
