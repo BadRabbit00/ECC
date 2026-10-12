@@ -146,6 +146,14 @@ for (const dirName of manifest.skills.include) {
         .replace(/^name:\s*["']?[^\n"']+["']?\s*$/m, `name: ${outName}`);
       fs.mkdirSync(path.dirname(path.join(destDir, f.rel)), { recursive: true });
       fs.writeFileSync(path.join(destDir, f.rel), content);
+    } else if (dirName === 'tdd-workflow' && f.rel === 'SKILL.md') {
+      // Pi does not substitute Claude plugin variables. Keep its existing
+      // detector command while canonical Claude content uses the plugin root.
+      content = fs.readFileSync(f.full, 'utf8').replace(
+        'node "${CLAUDE_PLUGIN_ROOT}/scripts/setup-package-manager.js" --detect',
+        'node scripts/setup-package-manager.js --detect');
+      fs.mkdirSync(path.dirname(path.join(destDir, f.rel)), { recursive: true });
+      fs.writeFileSync(path.join(destDir, f.rel), content);
     } else {
       copyFile(f.full, path.join(destDir, f.rel));
     }
