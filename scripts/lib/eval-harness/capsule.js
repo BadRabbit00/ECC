@@ -68,13 +68,13 @@ function metadataFailure(meta, entries = []) {
   return null;
 }
 
-function releaseOwnedLock(lockPath, fd, identity) {
+function releaseOwnedLock(lockPath, fd, identity, ownerToken) {
   let inspectionDenied;
   try {
-    // Keep the original descriptor open while checking ownership so its inode
-    // cannot be reused. Preserve a replacement detected before release; this
-    // check is not atomic against noncooperating filesystem mutation.
-    if (identity) {
+    // Keep the original descriptor open through the ownership checks. The
+    // token also distinguishes files when filesystem identities are ambiguous.
+    // This is not atomic against noncooperating filesystem mutation.
+    if (identity && ownerToken) {
       let current;
       try { current = fs.lstatSync(lockPath); } catch (error) {
         if (error.code === 'ENOENT') throw new CapsuleError('capsule.lock_lost', 'append lock disappeared before release');
@@ -82,7 +82,8 @@ function releaseOwnedLock(lockPath, fd, identity) {
         inspectionDenied = error;
       }
       if (!inspectionDenied) {
-        if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) {
+        if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino
+          || fs.readFileSync(lockPath, 'utf8') !== ownerToken) {
           throw new CapsuleError('capsule.lock_lost', 'append lock ownership changed before release');
         }
         fs.unlinkSync(lockPath);
@@ -113,11 +114,17 @@ function withAppendLock(dir, operation) {
     throw error;
   }
   let identity;
+  let ownerToken;
   try {
     identity = fs.fstatSync(fd);
+    const token = crypto.randomBytes(16).toString('hex');
+    fs.writeFileSync(fd, token, 'utf8');
+    ownerToken = token;
     return operation();
   } finally {
-    releaseOwnedLock(lockPath, fd, identity);
+    // Failed initialization keeps its partial barrier for diagnosis, without
+    // deleting a pathname whose ownership cannot be established.
+    releaseOwnedLock(lockPath, fd, identity, ownerToken);
   }
 }
 
