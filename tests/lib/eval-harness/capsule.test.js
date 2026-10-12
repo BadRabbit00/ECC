@@ -304,17 +304,13 @@ test('validation or clock exceptions release ownership so a later append can pro
 test('short writes complete the entire UTF-8 journal entry before acknowledgement', () => {
   const dir = tempDir('short-write');
   const originalWrite = fs.writeSync;
-  const originalOpen = fs.openSync;
   let journalFd;
   let chunks = 0;
   try {
     const c = capsule.Capsule.create(dir);
-    fs.openSync = (file, flags, ...args) => {
-      const fd = originalOpen(file, flags, ...args);
-      if (file === path.join(dir, capsule.JOURNAL_FILE) && flags === 'a') journalFd = fd;
-      return fd;
-    };
     fs.writeSync = (fd, data, offset, length, position) => {
+      // The initialized token is hex; the journal is a canonical JSON object.
+      if (journalFd === undefined && Buffer.isBuffer(data) && data[0] === 0x7b) journalFd = fd;
       if (fd !== journalFd) return originalWrite(fd, data, offset, length, position);
       chunks += 1;
       return originalWrite(fd, data, offset, Math.min(length, 7), position);
@@ -324,23 +320,19 @@ test('short writes complete the entire UTF-8 journal entry before acknowledgemen
     assert.ok(capsule.verify(dir).ok);
     assert.strictEqual(c.entries()[0].payload.message, 'snow \u2603');
     assert.ok(!fs.existsSync(appendLock(dir)));
-  } finally { fs.writeSync = originalWrite; fs.openSync = originalOpen; cleanup(dir); }
+  } finally { fs.writeSync = originalWrite; cleanup(dir); }
 });
 
 test('partial write failure leaves evidence and prevents later append from hiding the tail', () => {
   const dir = tempDir('partial-write');
   const originalWrite = fs.writeSync;
-  const originalOpen = fs.openSync;
   let journalFd;
   let chunks = 0;
   try {
     const c = capsule.Capsule.create(dir);
-    fs.openSync = (file, flags, ...args) => {
-      const fd = originalOpen(file, flags, ...args);
-      if (file === path.join(dir, capsule.JOURNAL_FILE) && flags === 'a') journalFd = fd;
-      return fd;
-    };
     fs.writeSync = (fd, data, offset, length, position) => {
+      // The initialized token is hex; the journal is a canonical JSON object.
+      if (journalFd === undefined && Buffer.isBuffer(data) && data[0] === 0x7b) journalFd = fd;
       if (fd !== journalFd) return originalWrite(fd, data, offset, length, position);
       if (chunks++ > 0) throw new Error('write fixture');
       return originalWrite(fd, data, offset, Math.min(length, 9), position);
@@ -354,29 +346,26 @@ test('partial write failure leaves evidence and prevents later append from hidin
     assert.ok(!fs.existsSync(appendLock(dir)));
     assert.throws(() => c.append('plan', 'later', {}), error => error.code === 'capsule.truncated_tail');
     assert.deepStrictEqual(fs.readFileSync(journal), bytes);
-  } finally { fs.writeSync = originalWrite; fs.openSync = originalOpen; cleanup(dir); }
+  } finally { fs.writeSync = originalWrite; cleanup(dir); }
 });
 
 
 test('a zero-progress write fails and releases the lock without pretending success', () => {
   const dir = tempDir('zero-write');
   const originalWrite = fs.writeSync;
-  const originalOpen = fs.openSync;
   let journalFd;
   try {
     const c = capsule.Capsule.create(dir);
-    fs.openSync = (file, flags, ...args) => {
-      const fd = originalOpen(file, flags, ...args);
-      if (file === path.join(dir, capsule.JOURNAL_FILE) && flags === 'a') journalFd = fd;
-      return fd;
+    fs.writeSync = (fd, data, offset, length, position) => {
+      if (journalFd === undefined && Buffer.isBuffer(data) && data[0] === 0x7b) journalFd = fd;
+      return fd === journalFd ? 0 : originalWrite(fd, data, offset, length, position);
     };
-    fs.writeSync = (fd, ...args) => fd === journalFd ? 0 : originalWrite(fd, ...args);
     assert.throws(() => c.append('plan', 'zero', {}), error => error.code === 'capsule.write_failed');
     fs.writeSync = originalWrite;
     assert.strictEqual(capsule.verify(dir).entry_count, 0);
     assert.ok(!fs.existsSync(appendLock(dir)));
     assert.strictEqual(c.append('plan', 'later', {}).seq, 0);
-  } finally { fs.writeSync = originalWrite; fs.openSync = originalOpen; cleanup(dir); }
+  } finally { fs.writeSync = originalWrite; cleanup(dir); }
 });
 
 test('fsync failure is an ambiguous acknowledgement and the next append reloads disk', () => {
