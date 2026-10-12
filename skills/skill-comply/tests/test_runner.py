@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +35,53 @@ def isolated_sandbox_base(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("scripts.runner.SANDBOX_BASE", tmp_path / "sandbox")
+
+
+def _directory_symlink(link: Path, target: Path) -> None:
+    """Create a test directory link, recognizing only unavailable Windows privilege."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        if sys.platform == "win32" and getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable (error 1314)")
+        raise
+
+
+class TestDirectorySymlinkFixture:
+    def test_windows_success_keeps_directory_link_flag(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys.modules[__name__], "sys", SimpleNamespace(platform="win32"))
+        with patch.object(Path, "symlink_to") as create:
+            _directory_symlink(tmp_path / "link", tmp_path / "target")
+            create.assert_called_once_with(tmp_path / "target", target_is_directory=True)
+
+    def test_only_windows_privilege_error_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys.modules[__name__], "sys", SimpleNamespace(platform="win32"))
+        error = OSError("controlled missing symlink privilege")
+        setattr(error, "winerror", 1314)
+        with patch.object(Path, "symlink_to", side_effect=error):
+            with pytest.raises(pytest.skip.Exception, match="error 1314"):
+                _directory_symlink(tmp_path / "link", tmp_path / "target")
+
+    @pytest.mark.parametrize(
+        ("platform", "winerror"),
+        [("win32", 5), ("win32", None), ("linux", 1314), ("darwin", 1314)],
+    )
+    def test_other_errors_still_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        platform: str, winerror: int | None,
+    ) -> None:
+        monkeypatch.setattr(sys.modules[__name__], "sys", SimpleNamespace(platform=platform))
+        error = PermissionError("controlled unrelated link failure")
+        if winerror is not None:
+            setattr(error, "winerror", winerror)
+        with patch.object(Path, "symlink_to", side_effect=error):
+            with pytest.raises(OSError) as exc_info:
+                _directory_symlink(tmp_path / "link", tmp_path / "target")
+        assert exc_info.value is error
 
 
 class TestSafeSandboxDirectory:
@@ -90,7 +138,7 @@ class TestSandboxBaseBoundary:
         sentinel = target / "sentinel"
         sentinel.write_bytes(b"outside must remain unchanged")
         base = tmp_path / "base"
-        base.symlink_to(outside, target_is_directory=True)
+        _directory_symlink(base, outside)
         monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
         with pytest.raises(ValueError, match="base"):
             _safe_sandbox_dir("probe")
@@ -110,7 +158,7 @@ class TestSandboxBaseBoundary:
         sentinel = target / "sentinel"
         sentinel.write_bytes(b"outside must remain unchanged")
         base.rmdir()
-        base.symlink_to(outside, target_is_directory=True)
+        _directory_symlink(base, outside)
         with pytest.raises(ValueError, match="base"):
             _setup_sandbox(selected, Scenario(id="probe", level=1, level_name="test", description="Disposable setup", prompt="No provider", setup_commands=()))
         assert sentinel.read_bytes() == b"outside must remain unchanged"
@@ -125,7 +173,7 @@ class TestSandboxBaseBoundary:
         sentinel = target / "sentinel"
         sentinel.write_bytes(b"outside must remain unchanged")
         base = tmp_path / "base"
-        base.symlink_to(outside, target_is_directory=True)
+        _directory_symlink(base, outside)
         monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
         with patch("scripts.runner.subprocess.run") as execute:
             with pytest.raises(ValueError, match="base"):
@@ -137,7 +185,7 @@ class TestSandboxBaseBoundary:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         base = tmp_path / "base"
-        base.symlink_to(tmp_path / "missing", target_is_directory=True)
+        _directory_symlink(base, tmp_path / "missing")
         monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
         with pytest.raises(ValueError, match="base"):
             _safe_sandbox_dir("probe")
@@ -202,7 +250,7 @@ class TestSandboxBaseBoundary:
         parent = tmp_path / "real-parent"
         parent.mkdir()
         alias = tmp_path / "parent-alias"
-        alias.symlink_to(parent, target_is_directory=True)
+        _directory_symlink(alias, parent)
         base = alias / "base"
         monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
         target = _safe_sandbox_dir("probe")
