@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +18,7 @@ from scripts.runner import (
     _setup_sandbox,
     run_scenario,
 )
+from scripts.scenario_generator import Scenario
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,136 @@ class TestSafeSandboxDirectory:
         with patch.object(Path, "resolve", side_effect=[tmp_path / "outside", base]):
             with pytest.raises(ValueError):
                 _safe_sandbox_dir("escape")
+
+
+class TestSandboxBaseBoundary:
+    def test_live_base_link_preserves_outside_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        outside = tmp_path / "outside"
+        target = outside / "probe"
+        target.mkdir(parents=True)
+        sentinel = target / "sentinel"
+        sentinel.write_bytes(b"outside must remain unchanged")
+        base = tmp_path / "base"
+        base.symlink_to(outside, target_is_directory=True)
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        with pytest.raises(ValueError, match="base"):
+            _safe_sandbox_dir("probe")
+        assert sentinel.read_bytes() == b"outside must remain unchanged"
+        assert not (target / ".git").exists()
+
+    def test_setup_rechecks_base_before_cleanup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = tmp_path / "base"
+        base.mkdir()
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        selected = _safe_sandbox_dir("probe")
+        outside = tmp_path / "outside"
+        target = outside / "probe"
+        target.mkdir(parents=True)
+        sentinel = target / "sentinel"
+        sentinel.write_bytes(b"outside must remain unchanged")
+        base.rmdir()
+        base.symlink_to(outside, target_is_directory=True)
+        with pytest.raises(ValueError, match="base"):
+            _setup_sandbox(selected, Scenario(id="probe", level=1, level_name="test", description="Disposable setup", prompt="No provider", setup_commands=()))
+        assert sentinel.read_bytes() == b"outside must remain unchanged"
+        assert not (target / ".git").exists()
+
+    def test_public_scenario_rejects_base_link_before_subprocess(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        outside = tmp_path / "outside"
+        target = outside / "probe"
+        target.mkdir(parents=True)
+        sentinel = target / "sentinel"
+        sentinel.write_bytes(b"outside must remain unchanged")
+        base = tmp_path / "base"
+        base.symlink_to(outside, target_is_directory=True)
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        with patch("scripts.runner.subprocess.run") as execute:
+            with pytest.raises(ValueError, match="base"):
+                run_scenario(Scenario(id="probe", level=1, level_name="test", description="Disposable setup", prompt="No provider", setup_commands=()))
+            execute.assert_not_called()
+        assert sentinel.read_bytes() == b"outside must remain unchanged"
+
+    def test_dangling_base_link_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = tmp_path / "base"
+        base.symlink_to(tmp_path / "missing", target_is_directory=True)
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        with pytest.raises(ValueError, match="base"):
+            _safe_sandbox_dir("probe")
+
+    @pytest.mark.parametrize("entry", ["safe", "setup"])
+    def test_directory_reparse_attributes_are_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str
+    ) -> None:
+        base = tmp_path / "base"
+        target = base / "probe"
+        target.mkdir(parents=True)
+        sentinel = target / "sentinel"
+        sentinel.write_bytes(b"preserve before reparse refusal")
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        original = Path.lstat
+        def controlled_lstat(path: Path) -> object:
+            if path == base:
+                return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_file_attributes=0x400)
+            return original(path)
+        monkeypatch.setattr(Path, "lstat", controlled_lstat)
+        with patch("scripts.runner.subprocess.run") as execute:
+            with pytest.raises(ValueError, match="base"):
+                if entry == "safe":
+                    _safe_sandbox_dir("probe")
+                else:
+                    _setup_sandbox(target, Scenario(id="probe", level=1, level_name="test", description="Disposable setup", prompt="No provider", setup_commands=()))
+            execute.assert_not_called()
+        assert sentinel.read_bytes() == b"preserve before reparse refusal"
+
+    @pytest.mark.parametrize("existing", [False, True])
+    def test_valid_setup_preserves_outside_sentinel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool
+    ) -> None:
+        base = tmp_path / "base"
+        target = base / "probe"
+        if existing:
+            target.mkdir(parents=True)
+            (target / "stale").write_bytes(b"prior scenario")
+        outside = tmp_path / "outside-sentinel"
+        outside.write_bytes(b"preserve outside")
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        _setup_sandbox(_safe_sandbox_dir("probe"), Scenario(id="probe", level=1, level_name="test", description="Disposable setup", prompt="No provider", setup_commands=()))
+        assert (target / ".git").is_dir()
+        assert not (target / "stale").exists()
+        assert outside.read_bytes() == b"preserve outside"
+
+    def test_regular_file_base_is_rejected_before_cleanup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = tmp_path / "base"
+        base.write_bytes(b"preserve base file")
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        with patch("scripts.runner.subprocess.run") as execute:
+            with pytest.raises(ValueError, match="base"):
+                _safe_sandbox_dir("probe")
+            execute.assert_not_called()
+        assert base.read_bytes() == b"preserve base file"
+
+    def test_parent_alias_remains_usable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        parent = tmp_path / "real-parent"
+        parent.mkdir()
+        alias = tmp_path / "parent-alias"
+        alias.symlink_to(parent, target_is_directory=True)
+        base = alias / "base"
+        monkeypatch.setattr("scripts.runner.SANDBOX_BASE", base)
+        target = _safe_sandbox_dir("probe")
+        _setup_sandbox(target, Scenario(id="probe", level=1, level_name="test", description="Disposable setup", prompt="No provider", setup_commands=()))
+        assert (parent / "base/probe/.git").is_dir()
 
 
 class TestSetupSandboxSkipsShellBuiltins:
