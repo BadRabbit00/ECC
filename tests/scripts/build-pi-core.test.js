@@ -72,13 +72,20 @@ test('Pi generation keeps TDD detector portable without changing canonical plugi
   const run = (...args) => spawnSync(process.execPath, [path.join(root, 'scripts/build-pi-core.js'), ...args], {
     cwd: root, encoding: 'utf8', timeout: 10000,
   });
-  for (const command of [quoted, relative]) {
+  const conditional = [
+    'if [ -n "${CLAUDE_PLUGIN_ROOT}" ]; then',
+    `  ${quoted}`, 'else', `  ${relative}`, 'fi',
+  ].join('\n');
+  const captured = fs.readFileSync(path.join(__dirname, '../../skills/tdd-workflow/SKILL.md'), 'utf8')
+    .split('### Step 0: Detect the Test Runner')[1].match(/```bash\n([\s\S]*?)```/)[1]
+    .replace(/^ {3}/gm, '').trim();
+  for (const command of [quoted, relative, conditional, captured]) {
     const canonical = `---\nname: tdd-workflow\ndescription: Test local code.\n---\n${command}\n${unrelated}\n`;
     write('skills/tdd-workflow/SKILL.md', canonical);
     const built = run();
     assert.equal(built.status, 0, built.stderr);
     const installed = fs.readFileSync(path.join(root, 'pi/core/skills/tdd-workflow/SKILL.md'), 'utf8');
-    assert.equal(installed, canonical.replace(quoted, relative));
+    assert.equal(installed, canonical.replace(captured, relative).replace(conditional, relative).replace(quoted, relative));
     assert.equal(fs.readFileSync(path.join(root, 'skills/tdd-workflow/SKILL.md'), 'utf8'), canonical);
     assert.equal(fs.readFileSync(path.join(root, 'pi/core/skills/demo/SKILL.md'), 'utf8'), demo);
     const check = run('--check');
