@@ -95,7 +95,7 @@ Do not assume `npm test`. The commands in the steps and examples below use `<tes
 IFS= read -r ecc_tdd_plugin_root <<'ECC_TDD_PLUGIN_ROOT_LITERAL'
 ${CLAUDE_PLUGIN_ROOT}
 ECC_TDD_PLUGIN_ROOT_LITERAL
-if [ ! -f "$ecc_tdd_plugin_root/scripts/setup-package-manager.js" ]; then
+if [ "$ecc_tdd_plugin_root" = '$''{CLAUDE_PLUGIN_ROOT}' ]; then
   ecc_tdd_plugin_root=${CLAUDE_PLUGIN_ROOT:-.}
 fi
 node "$ecc_tdd_plugin_root/scripts/setup-package-manager.js" --detect

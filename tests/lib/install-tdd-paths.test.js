@@ -87,3 +87,32 @@ test('plugin-root text stays data when its directory contains shell metacharacte
   assert.match(result.stdout, /Package Manager: pnpm/);
   assert.equal(fs.existsSync(path.join(root, 'PWN')), false, 'a path must never execute shell text');
 });
+
+for (const resolution of ['rendered', 'environment']) {
+  test(`resolved ${resolution} plugin root with missing detector never executes a project helper`, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc tdd missing plugin '));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const plugin = path.join(root, 'selected plugin');
+    const project = path.join(root, 'project cwd');
+    fs.mkdirSync(plugin);
+    fs.mkdirSync(path.join(project, 'scripts'), { recursive: true });
+    const marker = path.join(project, 'EXECUTED');
+    const helper = path.join(project, 'scripts', 'setup-package-manager.js');
+    const helperBytes = `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'executed'); console.log('PROJECT_HELPER_EXECUTED');`;
+    fs.writeFileSync(helper, helperBytes);
+    const repo = path.join(__dirname, '../..');
+    const code = detectorBlock(fs.readFileSync(path.join(repo, 'skills/tdd-workflow/SKILL.md'), 'utf8'));
+    const env = { ...process.env };
+    delete env.CLAUDE_PLUGIN_ROOT;
+    if (resolution === 'environment') env.CLAUDE_PLUGIN_ROOT = plugin;
+    const rendered = resolution === 'rendered' ? code.split('${CLAUDE_PLUGIN_ROOT}').join(plugin.split(path.sep).join('/')) : code;
+    const result = spawnSync('bash', ['-c', rendered], { cwd: project, env, encoding: 'utf8', timeout: 15000 });
+    assert.ifError(result.error);
+    assert.notEqual(result.status, 0, 'a selected missing plugin helper must fail visibly');
+    assert.match(result.stderr, /MODULE_NOT_FOUND/);
+    assert.equal(result.stdout.includes('PROJECT_HELPER_EXECUTED'), false);
+    assert.equal(fs.existsSync(marker), false);
+    assert.equal(fs.readFileSync(helper, 'utf8'), helperBytes);
+    assert.equal(fs.existsSync(path.join(plugin, 'scripts')), false);
+  });
+}

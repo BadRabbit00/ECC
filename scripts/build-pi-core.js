@@ -150,7 +150,7 @@ for (const dirName of manifest.skills.include) {
       // Pi does not substitute Claude plugin variables. Keep its existing
       // detector command while canonical Claude content uses the plugin root.
       content = fs.readFileSync(f.full, 'utf8').replace(
-        /^([ \t]*)IFS= read -r ecc_tdd_plugin_root <<'ECC_TDD_PLUGIN_ROOT_LITERAL'\r?\n[ \t]*\$\{CLAUDE_PLUGIN_ROOT\}\r?\n[ \t]*ECC_TDD_PLUGIN_ROOT_LITERAL\r?\n[ \t]*if \[ ! -f "\$ecc_tdd_plugin_root\/scripts\/setup-package-manager\.js" \]; then\r?\n[ \t]*ecc_tdd_plugin_root=\$\{CLAUDE_PLUGIN_ROOT:-\.\}\r?\n[ \t]*fi\r?\n[ \t]*node "\$ecc_tdd_plugin_root\/scripts\/setup-package-manager\.js" --detect$/m,
+        /^([ \t]*)IFS= read -r ecc_tdd_plugin_root <<'ECC_TDD_PLUGIN_ROOT_LITERAL'\r?\n[ \t]*\$\{CLAUDE_PLUGIN_ROOT\}\r?\n[ \t]*ECC_TDD_PLUGIN_ROOT_LITERAL\r?\n[ \t]*if \[ (?:(?:! -f "\$ecc_tdd_plugin_root\/scripts\/setup-package-manager\.js")|(?:"\$ecc_tdd_plugin_root" = '\$''\{CLAUDE_PLUGIN_ROOT\}')) \]; then\r?\n[ \t]*ecc_tdd_plugin_root=\$\{CLAUDE_PLUGIN_ROOT:-\.\}\r?\n[ \t]*fi\r?\n[ \t]*node "\$ecc_tdd_plugin_root\/scripts\/setup-package-manager\.js" --detect$/m,
         '$1node scripts/setup-package-manager.js --detect').replace(
         /^```bash\r?\nnode scripts\/setup-package-manager\.js --detect\r?\n```$/m,
         '   ```bash\n   node scripts/setup-package-manager.js --detect\n   ```').replace(
