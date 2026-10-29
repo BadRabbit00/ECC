@@ -128,10 +128,10 @@ let
     > - New files must be `git add`ed before Nix sees them. System changes go into
     >   `~/nixos-conf` and `sudo nixos-rebuild switch --flake .#badrabbitpc`, never into `/etc`.
     > - Scripts that ship with ECC run only through the pinned `ecc-run` wrapper;
+    >   secrets reach the devShell from sops-nix, never hardcoded or committed.
     > - Nix work has its own toolkit: `/nix-plan`, `/nix-write`, `/nix-build`, `/nix-test`,
     >   `/nix-review`, `/nix-fix`, agents `nix-architect`/`nix-engineer`/`nix-reviewer`/
     >   `nix-build-resolver`/`nix-test-runner`, skills `nix-toolkit`, `nix-packaging`.
-    >   secrets reach the devShell from sops-nix, never hardcoded or committed.
     >
     > Wherever the text below says `pip install`, `npm i -g`, `brew install`,
     > `npx -y …` or `uv run`, read it as "declare it in the flake and run it in
@@ -310,6 +310,12 @@ let
         } > "$out/agy/agents/$name.md"
       done < ${agentModelTable}
       echo "Codex roles: $(command ls "$out/codex/agents" | wc -l), agy agents: $(command ls "$out/agy/agents" | wc -l)"
+      for c in ${lib.escapeShellArgs codexExcludedCommands}; do
+        [ -f "$out/claude/commands/$c.md" ] || { echo "codexExcludedCommands lists missing command: $c" >&2; exit 1; }
+      done
+      for c in ${lib.escapeShellArgs codexExcludedCommands}; do
+        [ -f "$out/claude/commands/$c.md" ] || { echo "codexExcludedCommands lists missing command: $c" >&2; exit 1; }
+      done
       # Команды -> ~/.codex/prompts/ecc-<cmd>.md, как legacy sync: без frontmatter.
       for f in "$out"/claude/commands/*.md; do
         name=$(basename "$f" .md)

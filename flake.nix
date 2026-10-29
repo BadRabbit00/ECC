@@ -7,9 +7,10 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      # 2.2.3 — версия апстрима, дата — последний коммит этого дерева.
+      # Версия апстрима из package.json, дата — последний коммит этого дерева.
+      upstream = (builtins.fromJSON (builtins.readFile ./package.json)).version;
       date = self.lastModifiedDate or "19700101";
-      version = "2.2.3-unstable-${builtins.substring 0 4 date}-${builtins.substring 4 2 date}-${builtins.substring 6 2 date}";
+      version = "${upstream}-unstable-${builtins.substring 0 4 date}-${builtins.substring 4 2 date}-${builtins.substring 6 2 date}";
     in
     {
       # Для потребителей с собственным nixpkgs: ecc.lib.mk { inherit pkgs; }
@@ -34,14 +35,17 @@
           default = pkgs.mkShell {
             packages = [ pkgs.nodejs ecc.runtime.python pkgs.jq pkgs.gawk pkgs.remarshal pkgs.git ];
             shellHook = ''
-              ln -sfn ${ecc.runtime.nodeModules}/node_modules node_modules
+              # node_modules — симлинк в корне репозитория (а не в текущем каталоге),
+              # и только если там не лежит настоящий каталог после npm ci.
+              top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+              if [ ! -e "$top/node_modules" ] || [ -L "$top/node_modules" ]; then
+                ln -sfn ${ecc.runtime.nodeModules}/node_modules "$top/node_modules"
+              fi
               echo "ecc devShell: node $(node --version); validators: node scripts/ci/validate-*.js; tests: node tests/run-all.js tests/ci" >&2
             '';
           };
         });
 
-      checks = forAll (pkgs: {
-        payload = (self.lib.mk { inherit pkgs; }).payload;
-      });
+      checks = forAll (pkgs: { inherit (self.lib.mk { inherit pkgs; }) payload; });
     };
 }

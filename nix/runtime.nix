@@ -7,7 +7,15 @@
 
 let
   # src — дерево этого репозитория (self флейка): апстрим affaan-m/ecc плюс
-  # модуль badrabbit; version приходит из flake.nix (дата коммита).
+  # модуль badrabbit; version приходит из flake.nix (дата коммита). Сама
+  # Nix-упаковка (nix/, flake.*, .envrc, BADRABBIT.md) в CLAUDE_PLUGIN_ROOT не
+  # нужна и не должна пересобирать root с его тестами при правке payload.nix.
+  treeSrc = lib.cleanSourceWith {
+    inherit src;
+    filter = path: _type:
+      let rel = lib.removePrefix (toString src + "/") (toString path);
+      in !(lib.hasPrefix "nix/" rel || rel == "nix" || lib.hasPrefix "flake." rel || rel == ".envrc" || rel == "BADRABBIT.md");
+  };
 
   #   config-protection — блокирует правку конфигов линтеров;
   #   mcp-health-check — сам поднимает MCP-серверы для пробы и блокирует вызов;
@@ -72,10 +80,11 @@ let
 
   # --- Рантайм-дерево: репозиторий + node_modules ----------------------------
   # Хуки ищут корень по пробам scripts/lib/utils.js и skills/continuous-learning-v2,
-  # поэтому дерево остаётся полным (все 311 скиллов), а выборка — в payload ниже.
+  # поэтому дерево остаётся полным (все скиллы), а выборка — в payload ниже.
   root = pkgs.stdenvNoCC.mkDerivation {
     pname = "ecc";
-    inherit version src;
+    inherit version;
+    src = treeSrc;
 
     dontConfigure = true;
     dontBuild = true;
