@@ -179,6 +179,9 @@ skills:
   - x-api
 commands:
   - aside
+  - ask-agy
+  - ask-argon
+  - ask-astra
   - astra-review
   - auto-update
   - build-fix
@@ -231,6 +234,20 @@ commands:
   - multi-frontend
   - multi-plan
   - multi-workflow
+  - nix-build
+  - nix-check
+  - nix-devshell
+  - nix-docker
+  - nix-fix
+  - nix-gc
+  - nix-package
+  - nix-plan
+  - nix-review
+  - nix-search
+  - nix-test
+  - nix-update
+  - nix-why
+  - nix-write
   - orch-add-feature
   - orch-build-mvp
   - orch-change-feature
@@ -241,10 +258,10 @@ commands:
   - plan-canvas
   - plan-prd
   - pm2
+  - pr
+  - project-init
   - projects
   - promote
-  - project-init
-  - pr
   - prp-commit
   - prp-implement
   - prp-plan
@@ -275,6 +292,9 @@ commands:
   - update-codemaps
   - update-docs
   - vue-review
+  - write-agy
+  - write-argon
+  - write-astra
 tags:
   - agent-harness
   - developer-tools

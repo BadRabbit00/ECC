@@ -1457,7 +1457,14 @@
       "kind": "skills",
       "description": "BadRabbit fork-only skills (see BADRABBIT.md); consumed by nixos-conf via the ecc flake input.",
       "paths": [
-        "BADRABBIT.md"
+        "BADRABBIT.md",
+        "skills/nix-debugging",
+        "skills/nix-flake-patterns",
+        "skills/nixos-module-patterns",
+        "skills/nix-packaging",
+        "skills/nix-testing",
+        "skills/nix-toolkit",
+        "skills/project-flake"
       ],
       "targets": [
         "claude",

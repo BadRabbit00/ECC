@@ -108,3 +108,7 @@ ecc2/target/
 assets/images/security/badrudi-exploit.mp4
 
 .aider*
+# Nix: direnv and build outputs
+.direnv
+result
+result-*
