@@ -1,0 +1,97 @@
+{
+  "$comment": "Pinned Claude model + effort per agent installed by the br payload. Every br agent and every allowlisted fork agent must be listed, or the build fails. Aliases map: sonnet=claude-sonnet-5-5, opus=claude-opus-5-5, haiku=claude-haiku-5-5, fable=claude-fable-5-1.",
+  "agents": {
+    "presenter": {
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
+    },
+    "test-writer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "coder": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "refactorer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
+    },
+    "test-runner": {
+      "model": "claude-haiku-5-5",
+      "effort": "medium"
+    },
+    "build-fixer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "db-reviewer": {
+      "model": "claude-opus-5-5",
+      "effort": "high"
+    },
+    "optimizer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "code-reviewer": {
+      "model": "claude-opus-5-5",
+      "effort": "high"
+    },
+    "python-reviewer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "go-reviewer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "rust-reviewer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "ts-react-reviewer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "flutter-dart-reviewer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "security-reviewer": {
+      "model": "claude-opus-5-5",
+      "effort": "high"
+    },
+    "researcher": {
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
+    },
+    "architect-critic": {
+      "model": "claude-opus-5-5",
+      "effort": "high"
+    },
+    "ui-verifier": {
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
+    },
+    "nix-architect": {
+      "model": "claude-opus-5-5",
+      "effort": "high"
+    },
+    "nix-engineer": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high"
+    },
+    "nix-reviewer": {
+      "model": "claude-opus-5-5",
+      "effort": "xhigh"
+    },
+    "nix-build-resolver": {
+      "model": "claude-opus-5-5",
+      "effort": "xhigh"
+    },
+    "nix-test-runner": {
+      "model": "claude-sonnet-5-5",
+      "effort": "medium"
+    }
+  }
+}

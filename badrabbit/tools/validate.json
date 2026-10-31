@@ -1,0 +1,61 @@
+{
+  "limits": {
+    "core": 150,
+    "contract": 40,
+    "rule": 120,
+    "agent": 300,
+    "outputStyle": 220
+  },
+  "allowedModels": [
+    "sonnet",
+    "opus",
+    "haiku",
+    "fable",
+    "inherit"
+  ],
+  "allowedEffort": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "requiredDisallowed": [
+    "Agent",
+    "Skill",
+    "mcp__*"
+  ],
+  "forbiddenDescriptionWords": [
+    "proactively",
+    "must be used",
+    "use immediately",
+    "automatically"
+  ],
+  "examplesExempt": [],
+  "hookEvents": [
+    "PreToolUse",
+    "PostToolUse",
+    "UserPromptSubmit",
+    "Stop",
+    "SubagentStop",
+    "SessionStart",
+    "SessionEnd",
+    "PreCompact",
+    "Notification"
+  ],
+  "maxHookTimeout": 30,
+  "styleMarker": "BR-ORCHESTRATOR-STYLE-ACTIVE",
+  "docTemplates": [
+    "GENERAL.md",
+    "API.md",
+    "DATABASE.md",
+    "STRUCTURE.md",
+    "ENTITY.md",
+    "METHOD.md",
+    "SPECIFICATION.md",
+    "PATTERN.md",
+    "POLICY.md",
+    "OVERVIEW.md",
+    "example_db.dbml"
+  ]
+}

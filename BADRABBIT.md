@@ -27,6 +27,24 @@ merges `hooks.json` into `~/.claude/settings.json`. The manifest is the single
 source of truth: a skill not listed in a selected module
 (`developer` profile + `security` + `devops-infra` + `badrabbit`) is not installed.
 
+## Flavour `br` (the rewrite)
+
+`badrabbit/` holds the rewritten ECC: an orchestrator output style, 19 own agents
+(+ the 4 Nix agents from `agents/`), path-scoped rules, own skills, Python hooks
+and templates. Plan and decisions: `badrabbit/README.md`.
+
+| Where | What |
+| --- | --- |
+| `nix/payload-br.nix` → `packages.ecc-payload-br` | `$out/claude/{CLAUDE.md,agents,skills,commands,rules/br,output-styles,br/templates}`, `settings.fragment.json`, `hooks.json`. Runs the br validator and test suites in `checkPhase` |
+| `nix/payload-br.py` | model pins from `badrabbit/agent-models.json`, isolation of the allowlisted Nix agents, subagent contract injection, `hooks.json`, output self-checks |
+| `nix/runtime.nix` → `packages.br-hook` | `br-hook <entry>` wrapper for `badrabbit/hooks/*.py` with the pinned python |
+
+`badrabbit/` is excluded from the runtime tree, so the legacy `ecc-payload`
+derivation is unchanged. `nixos-conf` picks the flavour (`ecc.flavour =
+"legacy" | "br"`); for `br` it lays out `claude/*`, installs `CLAUDE.md`,
+deep-merges `settings.fragment.json` and merges `hooks.json` by id, and does
+not install `rules/ecc/`.
+
 ## Adding a skill
 
 1. `skills/<name>/SKILL.md` with inline frontmatter (`name:` equal to the
