@@ -25,6 +25,8 @@
           ecc-run = ecc.run;
           ecc-hook = ecc.hook;
           ecc-payload = ecc.payload;
+          ecc-payload-br = ecc.payloadBr;   # flavour br (badrabbit/): ecc.flavour = "br" in nixos-conf
+          br-hook = ecc.brHook;
         });
 
       # Разработка форка: валидаторы апстрима и тесты гоняются тем же node, что
@@ -46,6 +48,9 @@
           };
         });
 
-      checks = forAll (pkgs: { inherit (self.lib.mk { inherit pkgs; }) payload; });
+      checks = forAll (pkgs: let ecc = self.lib.mk { inherit pkgs; }; in {
+        inherit (ecc) payload;
+        payload-br = ecc.payloadBr;   # runs the br validator and test suites in checkPhase
+      });
     };
 }

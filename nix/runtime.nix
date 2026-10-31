@@ -14,7 +14,8 @@ let
     inherit src;
     filter = path: _type:
       let rel = lib.removePrefix (toString src + "/") (toString path);
-      in !(lib.hasPrefix "nix/" rel || rel == "nix" || lib.hasPrefix "flake." rel || rel == ".envrc" || rel == "BADRABBIT.md");
+      in !(lib.hasPrefix "nix/" rel || rel == "nix" || lib.hasPrefix "flake." rel || rel == ".envrc" || rel == "BADRABBIT.md"
+             || lib.hasPrefix "badrabbit/" rel || rel == "badrabbit");
   };
 
   #   config-protection — блокирует правку конфигов линтеров;
@@ -182,9 +183,27 @@ let
     '';
   };
 
+  # br-hook <entry>: hooks of the br flavour (badrabbit/hooks, Python stdlib). Pinned python, the
+  # scripts from their own store path; -I ignores PYTHONPATH and the user site, -B because the
+  # store is read-only. git: the guards read the current branch.
+  brHooks = builtins.path { path = src + "/badrabbit/hooks"; name = "br-hooks"; };
+  brHook = pkgs.writeShellApplication {
+    name = "br-hook";
+    runtimeInputs = [ python pkgs.git ];
+    text = ''
+      entry=''${1:?usage: br-hook <entry>}
+      case "$entry" in
+        guard_*|check_*|fix_*) ;;
+        *) echo "br-hook: unknown entry $entry" >&2; exit 64 ;;
+      esac
+      exec python3 -I -B ${brHooks}/"$entry".py
+    '';
+  };
+
   runExe = lib.getExe run;
   hookExe = lib.getExe hook;
+  brHookExe = lib.getExe brHook;
 in
 {
-  inherit src version root run hook runExe hookExe python nodeModules;
+  inherit src version root run hook runExe hookExe python nodeModules brHook brHookExe;
 }

@@ -8,8 +8,9 @@
 let
   runtime = import ./runtime.nix { inherit lib pkgs src version; };
   payload = import ./payload.nix { inherit lib pkgs runtime; };
+  payloadBr = import ./payload-br.nix { inherit lib pkgs runtime; };
 in
 {
-  inherit runtime payload;
-  inherit (runtime) root run hook;
+  inherit runtime payload payloadBr;
+  inherit (runtime) root run hook brHook;
 }

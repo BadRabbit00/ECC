@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "id": "br:guard:bash",
+        "description": "Bash: no host installs, git rules for develop/main, no destructive commands without «да», no secret output, no test edits by coder/refactorer/build-fixer",
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "@BR_HOOK@ guard_bash", "timeout": 10 }]
+      },
+      {
+        "id": "br:guard:write",
+        "description": "Edit/Write: test boundary by agent_type, task write sets from .plan/PLAN.md, orchestrator writes only docs and the plan",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [{ "type": "command", "command": "@BR_HOOK@ guard_write", "timeout": 10 }]
+      },
+      {
+        "id": "br:guard:read",
+        "description": "Read/Grep: .env, private keys and key files never enter the context",
+        "matcher": "Read|Grep",
+        "hooks": [{ "type": "command", "command": "@BR_HOOK@ guard_read", "timeout": 5 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "id": "br:check:written",
+        "description": "After Edit/Write: fix BOM and mixed line endings, block written secrets, lint compose and Dockerfiles",
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "@BR_HOOK@ check_written", "timeout": 10 }]
+      }
+    ]
+  }
+}
