@@ -1,0 +1,66 @@
+# Checks for the fork's own layer (branch `badrabbit`): the br flavour and the Nix packaging.
+# Upstream workflows stay as they are; this one only runs on the fork's branch and PRs into it.
+name: br
+
+on:
+  push:
+    branches: [badrabbit]
+  pull_request:
+    branches: [badrabbit]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: br-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast: validator and all br test suites on the runner's python (stdlib only, no Nix).
+  br-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validator
+        run: python3 badrabbit/tools/validate.py badrabbit --repo .
+      - name: Validator and measure_tokens tests
+        working-directory: badrabbit/tools
+        run: python3 -m unittest -v test_validate test_measure_tokens
+      - name: Hook tests
+        env:
+          GIT_AUTHOR_NAME: ci
+          GIT_AUTHOR_EMAIL: ci@localhost
+          GIT_COMMITTER_NAME: ci
+          GIT_COMMITTER_EMAIL: ci@localhost
+        run: python3 -m unittest discover -v -s badrabbit/hooks/test -t badrabbit/hooks/test
+      - name: Hook latency (< 150 ms)
+        run: |
+          start=$(date +%s%N)
+          echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp"}' | python3 -I -B badrabbit/hooks/guard_bash.py
+          ms=$(( ($(date +%s%N) - start) / 1000000 ))
+          echo "guard_bash: ${ms} ms"
+          [ "$ms" -lt 150 ]
+
+  # Full: both payloads build; the br payload runs its own self-checks and test suites inside the build.
+  nix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - name: nix flake check (legacy payload + br payload)
+        run: nix flake check -L
+      - name: br payload layout
+        run: |
+          nix build .#ecc-payload-br -L
+          echo "agents:   $(ls result/claude/agents | wc -l) (expected 23)"
+          echo "skills:   $(ls result/claude/skills | wc -l) (expected 37)"
+          echo "rules:    $(ls result/claude/rules/br | wc -l) (expected 16)"
+          echo "commands: $(ls result/claude/commands | wc -l) (expected 24)"
+          [ "$(ls result/claude/agents | wc -l)" -eq 23 ]
+          [ "$(ls result/claude/skills | wc -l)" -eq 37 ]
+          [ "$(ls result/claude/rules/br | wc -l)" -eq 16 ]
+          [ "$(ls result/claude/commands | wc -l)" -eq 24 ]
+          [ "$(grep -rl BR-ORCHESTRATOR-STYLE-ACTIVE result/ | wc -l)" -eq 1 ]
