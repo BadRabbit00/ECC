@@ -6,32 +6,84 @@ adversary; the orchestrator's sha256 check of test files and code review are the
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 import shlex
+from functools import lru_cache
 from pathlib import Path
 
 from .common import NO_TEST_WRITE, PROTECTED_BRANCHES, Event, git_branch, is_test_path
 
 # Split a command line into simple commands on ; && || | & and newlines (good enough for policy checks).
-SPLIT = re.compile(r"\s*(?:&&|\|\||;|\||(?<![>&])&(?![>&])|\n)\s*")
-WRAPPERS = {"sudo", "doas", "command", "exec", "time", "nohup", "nice", "env"}
+SEPARATOR = r"&&|\|\||;|\||(?<![>&])&(?![>&])|\n"
+SPLIT = re.compile(rf"\s*(?:{SEPARATOR})\s*")
+WRAPPERS = {"sudo", "doas", "command", "exec", "time", "nohup", "nice", "env",
+            "timeout", "setsid", "stdbuf", "ionice", "chrt", "flock"}
+# Shell keywords that may precede a command in a segment (`then python3 x`, `{ python3 x`, `! python3 x`).
+KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "do", "while", "until"}
+# Wrapper options that take a value as the next word.
+WRAPPER_VALUE_FLAGS = {
+    "sudo": {"-u", "-g", "-h", "-p", "-C"}, "doas": {"-u", "-C"}, "env": {"-u", "-C", "-S"},
+    "nice": {"-n"}, "timeout": {"-k", "-s"}, "time": {"-f", "-o"}, "stdbuf": {"-i", "-o", "-e"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u"}, "flock": {"-w", "-E"},
+}
+WRAPPER_POSITIONAL = {"timeout": 1, "chrt": 1, "flock": 1}   # DURATION / priority / lock file
+REDIRECT_WORD = re.compile(r"\d*[<>]&?\S*")
+REDIRECT_OPERATOR = re.compile(r"\d*[<>]{1,2}&?")           # `>` `2>` `>>`: the target is the next word
 
 
 def segments(cmd: str) -> list[str]:
     return [s.strip() for s in SPLIT.split(cmd) if s.strip()]
 
 
-def split_words(seg: str) -> list[str]:
+def split_words(seg: str, comments: bool = True) -> list[str]:
+    """Shell-like words. A `#` inside a word (`nixpkgs#x`, `.#dev`) is not a comment; a word that starts
+    with `#` is (and everything after it), unless `comments` is off because the caller already cut them."""
+    lex = shlex.shlex(seg, posix=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
     try:
-        return shlex.split(seg, comments=True)
+        w = list(lex)
     except ValueError:
-        return seg.split()
+        w = seg.split()
+    if comments:
+        for i, word in enumerate(w):
+            if word.startswith("#"):
+                return w[:i]
+    return w
+
+
+def _skip_wrapper_options(name: str, w: list[str]) -> list[str]:
+    values = WRAPPER_VALUE_FLAGS.get(name, set())
+    while w and w[0].startswith("-") and w[0] != "-":
+        flag, w = w[0], w[1:]
+        if flag == "--":
+            break
+        if flag in values and w:
+            w = (split_words(w[0], comments=False) + w[1:]) if (name, flag) == ("env", "-S") else w[1:]
+        elif name == "env" and flag.startswith("-S") and len(flag) > 2:
+            w = split_words(flag[2:], comments=False) + w
+    for _ in range(WRAPPER_POSITIONAL.get(name, 0)):
+        if w:
+            w = w[1:]
+    return w
 
 
 def strip_env_and_wrappers(w: list[str]) -> list[str]:
-    """Drop leading env assignments and wrappers that do not change meaning."""
-    while w and (re.fullmatch(r"\w+=.*", w[0]) or (w[0] in WRAPPERS and len(w) > 1)):
-        w = w[1:]
+    """Drop what precedes the command word: env assignments, shell keywords, redirections, and
+    wrappers that do not change meaning (with their options)."""
+    while w:
+        a = w[0]
+        if re.fullmatch(r"\w+=.*", a) or a in KEYWORDS:
+            w = w[1:]
+        elif REDIRECT_WORD.fullmatch(a):
+            w = w[2:] if REDIRECT_OPERATOR.fullmatch(a) else w[1:]
+        elif a in WRAPPERS and len(w) > 1:
+            if a == "command" and w[1] in {"-v", "-V"}:
+                return []                     # a lookup, nothing runs
+            w = _skip_wrapper_options(a, w[1:])
+        else:
+            break
     return w
 
 
@@ -98,90 +150,276 @@ def check_host_install(ev: Event, cmd: str) -> str | None:
 
 # ---------------------------------------------------------------- Nix only
 
-INTERPRETER = re.compile(r"python[23]?(\.\d+)*|pypy3?|node|nodejs|bun|deno|ruby|perl|php|lua|luajit|Rscript|julia")
+INTERPRETER = re.compile(
+    r"(?:python|pypy|ruby|perl|php|lua|node(?:js)?)[\d.]*[a-z]?|luajit[\d.-]*|ipython[\d.]*|tsx|ts-node"
+    r"|Rscript|julia|bun|deno")
 LAUNCHER = {"npx", "bunx", "uvx"}
-LAUNCHER_SUB = {"uv": "run", "pnpm": "dlx", "poetry": "run", "pipenv": "run"}
-SHELLS = {"bash", "sh", "zsh"}
-SEPARATOR = re.compile(r"&&|\|\||;|\||(?<![>&])&(?![>&])|\n")
+LAUNCHER_SUBCOMMANDS = {
+    "uv": {("run",), ("tool", "run")}, "pnpm": {("dlx",), ("exec",)}, "poetry": {("run",)},
+    "pipenv": {("run",)}, "npm": {("exec",)}, "yarn": {("dlx",)}, "pipx": {("run",)}, "pdm": {("run",)},
+    "hatch": {("run",)}, "bundle": {("exec",)}, "conda": {("run",)}, "pyenv": {("exec",)}, "mise": {("exec",)},
+}
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "ash"}
+SHELL_VALUE_OPTIONS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+SHELL_COMMAND_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+XARGS_VALUE_OPTIONS = {"-n", "-I", "-L", "-P", "-s", "-d", "-E", "-a", "-l"}
+NIX_VALUE_OPTIONS = {"--extra-experimental-features": 1, "--experimental-features": 1, "--option": 2,
+                     "--max-jobs": 1, "-j": 1, "--cores": 1, "--store": 1, "--eval-store": 1,
+                     "--log-format": 1, "--substituters": 1, "--extra-substituters": 1, "--builders": 1,
+                     "--override-input": 2, "--update-input": 1, "--inputs-from": 1, "--profile": 1,
+                     "--arg": 2, "--argstr": 2}
+MAX_DEPTH = 8
+HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)(\w+)\2")
+SEPARATOR_TOKEN = re.compile(SEPARATOR)
 
 
-def _top_level_segments(cmd: str) -> list[str]:
-    """Like segments(), but separators inside quotes do not split (`nix develop -c bash -c 'a && b'`)."""
-    out, start, i, quote = [], 0, 0, ""
+def _matching_paren(cmd: str, start: int) -> int:
+    """Index of the `)` that closes a `(` opened just before `start` (end of string if unbalanced)."""
+    depth = 1
+    for i in range(start, len(cmd)):
+        depth += {"(": 1, ")": -1}.get(cmd[i], 0)
+        if depth == 0:
+            return i
+    return len(cmd)
+
+
+def _skip_heredoc_bodies(cmd: str, i: int, pending: list[tuple[str, bool]]) -> int:
+    """`i` is just after a newline; skip the body of every pending heredoc, return the index after it."""
+    for tag, dash in pending:
+        while i < len(cmd):
+            end = cmd.find("\n", i)
+            end = len(cmd) if end < 0 else end
+            line = cmd[i:end]
+            i = min(end + 1, len(cmd))
+            if (line.lstrip("\t") if dash else line) == tag:
+                break
+    return i
+
+
+def _split_commands(cmd: str) -> list[str]:
+    """Simple commands of a command line. Unlike segments() it respects quotes, drops comments and
+    heredoc bodies, and treats `( ) $( ) <( ) >( )` and backticks as separators; `$(…)` and backticks
+    inside double quotes are extracted as commands of their own."""
+    out: list[str] = []
+    start = i = 0
+    quote = ""
+    pending: list[tuple[str, bool]] = []
+
+    def flush(end: int) -> None:
+        if cmd[start:end].strip():
+            out.append(cmd[start:end].strip())
+
     while i < len(cmd):
         c = cmd[i]
         if c == "\\" and quote != "'":
             i += 2
-            continue
-        if quote:
-            quote = "" if c == quote else quote
+        elif quote == "'":
+            quote = "" if c == "'" else quote
+            i += 1
+        elif quote == '"':
+            if c == '"':
+                quote, i = "", i + 1
+            elif cmd.startswith("$(", i):
+                end = _matching_paren(cmd, i + 2)
+                out.extend(_split_commands(cmd[i + 2:end]))
+                i = end + 1
+            elif c == "`":
+                end = cmd.find("`", i + 1)
+                end = len(cmd) if end < 0 else end
+                out.extend(_split_commands(cmd[i + 1:end]))
+                i = end + 1
+            else:
+                i += 1
         elif c in "'\"":
-            quote = c
+            quote, i = c, i + 1
+        elif c == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|()"):
+            flush(i)
+            end = cmd.find("\n", i)
+            start = i = len(cmd) if end < 0 else end
+        elif cmd.startswith("<<", i) and not cmd.startswith("<<<", i) and HEREDOC.match(cmd, i):
+            m = HEREDOC.match(cmd, i)
+            assert m is not None
+            pending.append((m.group(3), bool(m.group(1))))
+            i = m.end()
+        elif c in "()`":
+            flush(i - 1 if (c == "(" and i > start and cmd[i - 1] == "$") else i)
+            start = i = i + 1
+        elif c in "&|;\n" and (m := SEPARATOR_TOKEN.match(cmd, i)):
+            flush(i)
+            i = m.end()
+            if c == "\n" and pending:
+                i, pending = _skip_heredoc_bodies(cmd, i, pending), []
+            start = i
         else:
-            m = SEPARATOR.match(cmd, i)
-            if m:
-                out.append(cmd[start:i])
-                start = i = m.end()
-                continue
-        i += 1
-    out.append(cmd[start:])
-    return [s.strip() for s in out if s.strip()]
+            i += 1
+    flush(len(cmd))
+    return out
 
 
-def _skill_roots() -> re.Pattern[str]:
-    home = [re.escape(os.environ["HOME"].rstrip("/"))] if os.environ.get("HOME", "").strip("/") else []
-    home += [r"~", r"\$HOME", r"\$\{HOME\}"]
-    skills = r"\.(?:claude|codex)/skills|\.gemini/config/skills"
+@lru_cache(maxsize=4)
+def _skill_root(home: str) -> re.Pattern[str]:
+    homes = "|".join([re.escape(home.rstrip("/"))] * bool(home.strip("/")) + [r"~[^/]*", r"/home/[^/]+", r"/root",
+                                                                              r"\$HOME", r"\$\{HOME\}"])
+    agent = r"(?:\.claude|\.codex|\.gemini/config)"
     return re.compile(
-        rf"(?:{'|'.join(home)})/(?:{skills})(?:/|$)"
-        r"|/nix/store/[^/]+(?:/skills|-skills)(?:/|$)"
-        r"|\$\{?CLAUDE_SKILL_DIR\}?(?:/|$)")
+        rf"(?:{homes})/{agent}/skills(?:/|$)"
+        rf"|/nix/store/[^/]+/(?:[^/]+/)*{agent}?/?skills(?:/|$)"
+        r"|/nix/store/[^/]+-skills(?:/|$)")
 
 
 def _is_skill_path(arg: str) -> bool:
-    if re.match(r"/nix/store/[^/]+/bin/", arg):
-        return False                       # a packaged wrapper, whatever it is called
-    return _skill_roots().match(arg) is not None
+    """True for a path inside an agent skills directory (also `--opt=path`). Packaged wrappers are not."""
+    home = os.environ.get("HOME", "")
+    for cand in (arg, arg.partition("=")[2]):
+        if re.match(r"\$\{?CLAUDE_SKILL_DIR\}?(?:/|$)", cand):
+            return True
+        if home:
+            cand = re.sub(r"^(?:~|\$HOME|\$\{HOME\})(?=/|$)", lambda _: home, cand)
+        if not cand:
+            continue
+        cand = posixpath.normpath(cand)
+        if not re.match(r"/nix/store/[^/]+/bin/", cand) and _skill_root(home).match(cand):
+            return True
+    return False
 
 
 def _is_interpreter(w: list[str]) -> bool:
     name = Path(w[0]).name
-    return bool(INTERPRETER.fullmatch(name)) or name in LAUNCHER or (len(w) > 1 and LAUNCHER_SUB.get(name) == w[1])
+    if INTERPRETER.fullmatch(name) or name in LAUNCHER:
+        return True
+    subs = LAUNCHER_SUBCOMMANDS.get(name)
+    if not subs:
+        return False
+    i = 1
+    while i < len(w) and w[i].startswith("-"):    # `uv --directory . run x`: skip the option and its value
+        i += 1
+        if "=" not in w[i - 1] and i < len(w) and not any(w[i] == s[0] for s in subs):
+            i += 1
+    return any(tuple(w[i:i + len(s)]) == s for s in subs)
+
+
+def _unwrap_nix(w: list[str]) -> tuple[list[str], bool] | None:
+    """For `nix develop|shell … -c CMD`, `nix run X -- ARGS`, `nix-shell --run CMD`: the command that
+    runs inside Nix and True. None if `w` is not such a call."""
+    name = Path(w[0]).name
+    if name == "nix-shell":
+        for flag in ("--run", "--command"):
+            if flag in w[:-1]:
+                return ["sh", "-c", w[w.index(flag) + 1]], True
+        return [], True
+    if name != "nix":
+        return None
+    i = 1
+    while i < len(w) and w[i].startswith("-"):
+        i += 1 + NIX_VALUE_OPTIONS.get(w[i], 0)
+    sub = w[i] if i < len(w) else ""
+    rest = w[i + 1:]
+    if sub in {"develop", "shell"}:
+        flags = [j for j, a in enumerate(rest) if a in {"-c", "--command"}]
+        return (rest[flags[0] + 1:] if flags else []), True
+    if sub == "run":
+        installable = next((a for a in rest if not a.startswith("-")), "")
+        program = installable.partition("#")[2]
+        args = rest[rest.index("--") + 1:] if "--" in rest else []
+        return ([program] if program else []) + args, True
+    return None
+
+
+def _find_exec_commands(w: list[str]) -> list[list[str]]:
+    out = []
+    for i, a in enumerate(w):
+        if a in {"-exec", "-execdir", "-ok", "-okdir"}:
+            cmd: list[str] = []
+            for b in w[i + 1:]:
+                if b in {";", "+", "{}"}:
+                    break
+                cmd.append(b)
+            out.append(cmd)
+    return out
+
+
+def _shell_script(w: list[str]) -> str | None:
+    """The script of `bash -c SCRIPT` (also `-lc`, `-l -c`, `--norc -c`, `-o pipefail -c`)."""
+    i = 1
+    while i < len(w) and w[i] != "--" and w[i][0] in "-+":
+        if SHELL_COMMAND_FLAG.fullmatch(w[i]):
+            return w[i + 1] if i + 1 < len(w) else None
+        i += 2 if w[i] in SHELL_VALUE_OPTIONS else 1
+    return None
 
 
 NIX_SKILL_REASON = ("Skill scripts are not run from the skills directory. Use the skill's Nix wrapper "
                     "(a /nix/store/…/bin/<name> command); SKILL.md of the skill says which one.")
+NIX_VARIABLE_REASON = ("The command comes from a variable or substitution, so it cannot be checked. "
+                       "Write the command out and run it through the project environment: `nix develop -c …`.")
+NIX_DEPTH_REASON = "The command is too deeply nested (shell -c inside shell -c …) to check. Simplify it."
 
 
-def _nix_only_reason(cmd: str, wrapped: bool) -> str | None:
-    for seg in _top_level_segments(cmd):
-        w = strip_env_and_wrappers(split_words(seg))
-        if len(w) > 1 and w[0] == "nix" and w[1] in {"develop", "shell"}:
-            flags = [i for i, a in enumerate(w) if a in {"-c", "--command"}]
-            w, wrapped_here = (strip_env_and_wrappers(w[flags[0] + 1:]), True) if flags else ([], wrapped)
-        elif len(w) > 1 and w[0] == "nix" and w[1] == "run":
-            w, wrapped_here = (strip_env_and_wrappers(w[w.index("--") + 1:]) if "--" in w else []), True
-        else:
-            wrapped_here = wrapped
-        if not w:
-            continue
-        name = Path(w[0]).name
-        if name in SHELLS and len(w) >= 3 and w[1] == "-c":
-            reason = _nix_only_reason(w[2], wrapped_here)
-            if reason:
-                return reason
-            continue
-        runs_args = name in SHELLS or _is_interpreter(w)
-        if _is_skill_path(w[0]) or (runs_args and any(_is_skill_path(a) for a in w[1:])):
+def _runs_from_cwd(w: list[str]) -> bool:
+    """After `cd <skills dir>`: a relative command (`./run`) or a script for an interpreter/shell."""
+    head = w[0]
+    if "/" in head and not head.startswith(("/", "~", "$")):
+        return True
+    return (_is_interpreter(w) or Path(head).name in SHELLS) and \
+        any(not a.startswith(("-", "/", "~", "$")) for a in w[1:])
+
+
+def _nix_commands(cmd: str, wrapped: bool, depth: int) -> str | None:
+    if depth > MAX_DEPTH:
+        return NIX_DEPTH_REASON
+    in_skill_dir = False
+    for seg in _split_commands(cmd.replace("\\\n", " ")):
+        w = strip_env_and_wrappers(split_words(seg, comments=False))
+        if w and w[0] in {"cd", "pushd"}:
+            in_skill_dir = len(w) > 1 and _is_skill_path(w[-1])
+        elif in_skill_dir and w and _runs_from_cwd(w):
             return NIX_SKILL_REASON
-        if _is_interpreter(w) and not wrapped_here and not w[0].startswith("/nix/store/"):
-            return (f"Bare `{name}` is not allowed: run it through the project environment, "
-                    f"`nix develop -c {name} …`, or a one-off `nix shell nixpkgs#<pkg> -c {name} …`.")
+        reason = _nix_words(w, wrapped, depth)
+        if reason:
+            return reason
+    return None
+
+
+def _nix_words(w: list[str], wrapped: bool, depth: int) -> str | None:
+    w = strip_env_and_wrappers(w)
+    if w:
+        w = [re.split(r"[<>]", w[0])[0]] + w[1:]      # `python3>out`, `python3</dev/null`
+    if not w or not w[0]:
+        return None
+    head, name = w[0], Path(w[0]).name
+    if _is_skill_path(head):
+        return NIX_SKILL_REASON
+    inner = _unwrap_nix(w)
+    if inner is not None:
+        return _nix_words(inner[0], True, depth + 1)
+    if name == "busybox":
+        return _nix_words(w[1:], wrapped, depth + 1)
+    if name == "eval":
+        return _nix_commands(" ".join(w[1:]), wrapped, depth + 1)
+    if name == "xargs":
+        i = 1
+        while i < len(w) and w[i].startswith("-"):
+            i += 2 if w[i] in XARGS_VALUE_OPTIONS else 1
+        return _nix_words(w[i:], wrapped, depth + 1)
+    if name == "find":
+        return next(filter(None, (_nix_words(c, wrapped, depth + 1) for c in _find_exec_commands(w))), None)
+    if name in SHELLS:
+        script = _shell_script(w)
+        if script is not None:
+            return _nix_commands(script, wrapped, depth + 1)
+    if not wrapped and head.startswith(("$", "`")) and not re.match(r"\$\{?HOME\}?/", head):
+        return NIX_VARIABLE_REASON
+    interpreter = _is_interpreter(w)
+    if (interpreter or name in SHELLS or head in {"source", "."}) and any(_is_skill_path(a) for a in w[1:]):
+        return NIX_SKILL_REASON
+    if interpreter and not wrapped and not head.startswith("/nix/store/"):
+        return (f"Bare `{name}` is not allowed: run it through the project environment, "
+                f"`nix develop -c {name} …`, or a one-off `nix shell nixpkgs#<pkg> -c {name} …`.")
     return None
 
 
 def check_nix_only(ev: Event, cmd: str) -> str | None:
-    return _nix_only_reason(cmd, False)
+    return _nix_commands(cmd, False, 0)
 
 
 # ---------------------------------------------------------------- git

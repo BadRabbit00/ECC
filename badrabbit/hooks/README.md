@@ -45,7 +45,11 @@ Free on any branch except `main`, `master`, `develop`.
 
 ## Nix only
 
-`guard_bash` denies a bare interpreter (`python3`, `node`, `ruby`, `perl`, … and launchers `npx`, `bunx`, `uvx`, `uv run`, `pnpm dlx`, `poetry run`, `pipenv run`) unless the command runs inside `nix develop … -c`, `nix shell … -c`, `nix run`, or the interpreter is a `/nix/store` path; `bash -c '…'` is inspected too. It also denies running anything from an agent skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.gemini/config/skills`, `/nix/store/*skills*`, `$CLAUDE_SKILL_DIR`), directly or as an argument of an interpreter or shell, even inside a Nix wrapper: use the skill's packaged `/nix/store/…/bin/<name>` command named in its SKILL.md. Reading skill files (`cat`, `grep`, `ls`) is not affected.
+`guard_bash` denies a bare interpreter (`python3`, `node`, `ruby`, `perl`, `ipython`, `tsx`, … and launchers `npx`, `bunx`, `uvx`, `uv run`, `pnpm dlx|exec`, `poetry run`, `npm exec`, `yarn dlx`, `pipx run`, `bundle exec`, `conda run`, …) unless the command runs inside `nix develop … -c`, `nix shell … -c`, `nix run`, `nix-shell --run`, or the interpreter is a `/nix/store` path. The check looks through quotes, `bash -c '…'` (also `-lc`, `-o pipefail -c`), `$(…)`, backticks, `( )`, `{ }`, `if/then/do`, wrappers with options (`sudo -u x`, `env -S`, `timeout 5`, `nice -n`), `xargs`, `find -exec`, redirections, and skips heredoc bodies and comments. A command taken from a variable (`$p x`) is denied outside Nix; `eval` is checked through its argument. `perl -pi -e` one-liners are denied outside Nix like any other `perl`.
+
+It also denies running anything from an agent skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.gemini/config/skills`, `/nix/store/…/skills`, `/nix/store/*-skills`, `$CLAUDE_SKILL_DIR`; paths are normalised: `//`, `/./`, `..`, `$HOME`, other users' homes), directly or as an argument of an interpreter, shell, `source`, or after `cd <skills dir>` in the same command line, even inside a Nix wrapper. Use the skill's packaged `/nix/store/…/bin/<name>` command named in its SKILL.md. Reading skill files (`cat`, `grep`, `ls`) is not affected.
+
+Known limits: `cd` into a skills directory in one Bash call and `./x` in another; copying a script out and running it; `cat script | bash`; symlinks into a skills directory; paths built from variables; nesting deeper than 8 levels is denied.
 
 ## Upstream ECC hooks
 
