@@ -27,7 +27,6 @@
           ecc-payload = ecc.payload;
           ecc-payload-br = ecc.payloadBr;   # flavour br (badrabbit/): ecc.flavour = "br" in nixos-conf
           br-hook = ecc.brHook;
-          br-risk = ecc.brRisk;
         });
 
       # Разработка форка: валидаторы апстрима и тесты гоняются тем же node, что

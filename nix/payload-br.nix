@@ -1,7 +1,7 @@
 # ECC payload, flavour `br` (badrabbit/, see badrabbit/README.md and ECC-REWRITE-PLAN).
 # Next to the legacy payload.nix, not instead of it: nixos-conf picks one with ecc.flavour.
 # Output:
-#   $out/claude/{CLAUDE.md,agents,skills,commands,rules/br,output-styles,br/templates,br/bin/br-risk}
+#   $out/claude/{CLAUDE.md,agents,skills,commands,rules/br,output-styles,br/templates}
 #   $out/settings.fragment.json   env + outputStyle, merged into ~/.claude/settings.json
 #   $out/hooks.json               br:* hooks with the pinned br-hook wrapper
 # No Nix-doctrine banner (core/subagent-contract.md replaces it), no codex/agy export yet.
@@ -34,7 +34,7 @@ let
       export GIT_AUTHOR_NAME=nix GIT_AUTHOR_EMAIL=nix@localhost GIT_COMMITTER_NAME=nix GIT_COMMITTER_EMAIL=nix@localhost
       cp -r ${br} "$TMPDIR/br" && chmod -R u+w "$TMPDIR/br"
       python3 -I -B "$TMPDIR/br/tools/validate.py" "$TMPDIR/br" --repo ${src}
-      (cd "$TMPDIR/br/tools" && python3 -B -m unittest -q test_validate test_measure_tokens test_risk_score)
+      (cd "$TMPDIR/br/tools" && python3 -B -m unittest -q test_validate test_measure_tokens)
       python3 -B -m unittest discover -q -s "$TMPDIR/br/hooks/test" -t "$TMPDIR/br/hooks/test"
       runHook postCheck
     '';
@@ -49,7 +49,6 @@ let
       cp ${br}/output-styles/*.md "$c/output-styles/"
       cp ${br}/rules/*.md "$c/rules/br/"
       cp -r ${br}/templates/. "$c/br/templates/"
-      mkdir -p "$c/br/bin" && ln -s ${lib.getExe runtime.brRisk} "$c/br/bin/br-risk"
 
       # Agents: br agents + allowlisted fork agents (the fork's nix-reviewer is replaced by br's).
       cp ${br}/agents/*.md "$c/agents/"
@@ -135,7 +134,7 @@ let
       runHook postInstall
     '';
 
-    meta.description = "ECC payload, br flavour: orchestrator style, 24 isolated agents, path rules, br hooks";
+    meta.description = "ECC payload, br flavour: orchestrator style, 23 isolated agents, path rules, br hooks";
   };
 in
 payload

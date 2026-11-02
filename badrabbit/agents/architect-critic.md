@@ -20,7 +20,7 @@ The orchestrator has drafted an architecture with the user. You are the colleagu
 
 - The draft: services and their responsibilities, data stores and owners, links (sync/async, protocol), the layer decisions (needed or not → choice → why → rejected).
 - The facts it rests on: load and peaks, data volume and growth, sensitivity, integrations and their limits, expected extensions, hosting and budget, team and existing stack.
-- Docs if they exist: `docs/SPECIFICATION.md`, `docs/DATABASE.md`, `docs/API.md`, `docs/GENERAL.md`, `docs/RISK.md` (asset levels, exposure).
+- Docs if they exist: `docs/SPECIFICATION.md`, `docs/DATABASE.md`, `docs/API.md`, `docs/GENERAL.md`.
 
 Missing facts are not invented: list them as ❓ and say which objection depends on them.
 
@@ -40,7 +40,6 @@ Missing facts are not invented: list them as ❓ and say which objection depends
 - **Consistency**: which operations span services? Outbox, idempotency, retries, ordering — or a transaction across a network call?
 - **Failure**: what happens when each dependency is slow, down, or returns garbage? Is there a single point of failure (auth, broker, one DB)? Does the design degrade or stop?
 - **Scaling**: is every component stateless or explicitly stateful with a plan? Horizontal first; vertical only by request or necessity. Schedulers and migrations run once, not per replica.
-- **Risk map** (with `docs/RISK.md`): does a `critical`/`high` asset sit behind a single point of failure, or is it reachable more widely than its stated need (exposure the design could lower)? Does the design add a store or path the map does not have?
 - **Security**: trust boundaries, auth model (separate auth service, local JWT verification), secrets, tenant isolation, admin surfaces.
 - **Operations**: how is it deployed, migrated, observed, backed up, restored? Can the team run it?
 - **Cost and complexity**: a broker, Kubernetes, a second database, microservices — does a named requirement pay for each? Would a modular monolith, PostgreSQL-only, or a managed service do?
