@@ -5,6 +5,7 @@ adversary; the orchestrator's sha256 check of test files and code review are the
 """
 from __future__ import annotations
 
+import os
 import re
 import shlex
 from pathlib import Path
@@ -20,14 +21,22 @@ def segments(cmd: str) -> list[str]:
     return [s.strip() for s in SPLIT.split(cmd) if s.strip()]
 
 
-def words(seg: str) -> list[str]:
+def split_words(seg: str) -> list[str]:
     try:
-        w = shlex.split(seg, comments=True)
+        return shlex.split(seg, comments=True)
     except ValueError:
-        w = seg.split()
-    # drop leading env assignments and wrappers that do not change meaning
+        return seg.split()
+
+
+def strip_env_and_wrappers(w: list[str]) -> list[str]:
+    """Drop leading env assignments and wrappers that do not change meaning."""
     while w and (re.fullmatch(r"\w+=.*", w[0]) or (w[0] in WRAPPERS and len(w) > 1)):
         w = w[1:]
+    return w
+
+
+def words(seg: str) -> list[str]:
+    w = strip_env_and_wrappers(split_words(seg))
     # look inside `nix develop -c …` / `nix shell … -c …`
     if len(w) > 2 and w[0] == "nix" and w[1] in {"develop", "shell"}:
         for flag in ("-c", "--command"):
@@ -85,6 +94,94 @@ def check_host_install(ev: Event, cmd: str) -> str | None:
                         "Add the dependency to the project flake/devShell (or pyproject + nixpkgs), "
                         "or run a one-off tool with `nix shell nixpkgs#<pkg> -c <cmd>`.")
     return None
+
+
+# ---------------------------------------------------------------- Nix only
+
+INTERPRETER = re.compile(r"python[23]?(\.\d+)*|pypy3?|node|nodejs|bun|deno|ruby|perl|php|lua|luajit|Rscript|julia")
+LAUNCHER = {"npx", "bunx", "uvx"}
+LAUNCHER_SUB = {"uv": "run", "pnpm": "dlx", "poetry": "run", "pipenv": "run"}
+SHELLS = {"bash", "sh", "zsh"}
+SEPARATOR = re.compile(r"&&|\|\||;|\||(?<![>&])&(?![>&])|\n")
+
+
+def _top_level_segments(cmd: str) -> list[str]:
+    """Like segments(), but separators inside quotes do not split (`nix develop -c bash -c 'a && b'`)."""
+    out, start, i, quote = [], 0, 0, ""
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        else:
+            m = SEPARATOR.match(cmd, i)
+            if m:
+                out.append(cmd[start:i])
+                start = i = m.end()
+                continue
+        i += 1
+    out.append(cmd[start:])
+    return [s.strip() for s in out if s.strip()]
+
+
+def _skill_roots() -> re.Pattern[str]:
+    home = [re.escape(os.environ["HOME"].rstrip("/"))] if os.environ.get("HOME", "").strip("/") else []
+    home += [r"~", r"\$HOME", r"\$\{HOME\}"]
+    skills = r"\.(?:claude|codex)/skills|\.gemini/config/skills"
+    return re.compile(
+        rf"(?:{'|'.join(home)})/(?:{skills})(?:/|$)"
+        r"|/nix/store/[^/]+(?:/skills|-skills)(?:/|$)"
+        r"|\$\{?CLAUDE_SKILL_DIR\}?(?:/|$)")
+
+
+def _is_skill_path(arg: str) -> bool:
+    if re.match(r"/nix/store/[^/]+/bin/", arg):
+        return False                       # a packaged wrapper, whatever it is called
+    return _skill_roots().match(arg) is not None
+
+
+def _is_interpreter(w: list[str]) -> bool:
+    name = Path(w[0]).name
+    return bool(INTERPRETER.fullmatch(name)) or name in LAUNCHER or (len(w) > 1 and LAUNCHER_SUB.get(name) == w[1])
+
+
+NIX_SKILL_REASON = ("Skill scripts are not run from the skills directory. Use the skill's Nix wrapper "
+                    "(a /nix/store/…/bin/<name> command); SKILL.md of the skill says which one.")
+
+
+def _nix_only_reason(cmd: str, wrapped: bool) -> str | None:
+    for seg in _top_level_segments(cmd):
+        w = strip_env_and_wrappers(split_words(seg))
+        if len(w) > 1 and w[0] == "nix" and w[1] in {"develop", "shell"}:
+            flags = [i for i, a in enumerate(w) if a in {"-c", "--command"}]
+            w, wrapped_here = (strip_env_and_wrappers(w[flags[0] + 1:]), True) if flags else ([], wrapped)
+        elif len(w) > 1 and w[0] == "nix" and w[1] == "run":
+            w, wrapped_here = (strip_env_and_wrappers(w[w.index("--") + 1:]) if "--" in w else []), True
+        else:
+            wrapped_here = wrapped
+        if not w:
+            continue
+        name = Path(w[0]).name
+        if name in SHELLS and len(w) >= 3 and w[1] == "-c":
+            reason = _nix_only_reason(w[2], wrapped_here)
+            if reason:
+                return reason
+            continue
+        runs_args = name in SHELLS or _is_interpreter(w)
+        if _is_skill_path(w[0]) or (runs_args and any(_is_skill_path(a) for a in w[1:])):
+            return NIX_SKILL_REASON
+        if _is_interpreter(w) and not wrapped_here and not w[0].startswith("/nix/store/"):
+            return (f"Bare `{name}` is not allowed: run it through the project environment, "
+                    f"`nix develop -c {name} …`, or a one-off `nix shell nixpkgs#<pkg> -c {name} …`.")
+    return None
+
+
+def check_nix_only(ev: Event, cmd: str) -> str | None:
+    return _nix_only_reason(cmd, False)
 
 
 # ---------------------------------------------------------------- git
@@ -335,7 +432,7 @@ def check_tests_via_bash(ev: Event, cmd: str) -> str | None:
     return None
 
 
-CHECKS = [check_host_install, check_git, check_destructive, check_secrets, check_tests_via_bash]
+CHECKS = [check_host_install, check_nix_only, check_git, check_destructive, check_secrets, check_tests_via_bash]
 
 
 def run(ev: Event) -> str | None:

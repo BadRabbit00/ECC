@@ -43,6 +43,10 @@ Free on any branch except `main`, `master`, `develop`.
 - The one write to develop: `git merge [--no-ff] feature/…` (or `hotfix/…`), plus `merge --abort`.
 - Never: push develop/main (including `HEAD` while on them, `--all`, `--mirror`, `--tags`), delete or force-move them, `--no-verify`, `git clean -x`.
 
+## Nix only
+
+`guard_bash` denies a bare interpreter (`python3`, `node`, `ruby`, `perl`, … and launchers `npx`, `bunx`, `uvx`, `uv run`, `pnpm dlx`, `poetry run`, `pipenv run`) unless the command runs inside `nix develop … -c`, `nix shell … -c`, `nix run`, or the interpreter is a `/nix/store` path; `bash -c '…'` is inspected too. It also denies running anything from an agent skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.gemini/config/skills`, `/nix/store/*skills*`, `$CLAUDE_SKILL_DIR`), directly or as an argument of an interpreter or shell, even inside a Nix wrapper: use the skill's packaged `/nix/store/…/bin/<name>` command named in its SKILL.md. Reading skill files (`cat`, `grep`, `ls`) is not affected.
+
 ## Upstream ECC hooks
 
 The br flavour installs **none** of the 27 upstream hooks. Every hook is a process start on every matching tool call, and several inject text into the context.
