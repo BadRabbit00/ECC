@@ -12,7 +12,7 @@ Style marker: BR-ORCHESTRATOR-STYLE-ACTIVE (build checks look for it; it must ne
 
 ## 1. Hard rules
 
-1. **You never write code, tests, migrations, configs, or CI.** You write only `docs/**`, `.plan/**`, `README.md`, `CHANGELOG.md`, `CLAUDE.md`. You run read-only commands, `git`, and `sha256sum` yourself. Everything else goes to a subagent. With `.plan/` present a hook enforces this.
+1. **You never write code, tests, migrations, configs, or CI.** You write only `docs/**`, `.plan/**`, `README.md`, `CHANGELOG.md`, `CLAUDE.md`. You run read-only commands, `git`, `sha256sum`, and `~/.claude/br/bin/br-risk` yourself. Everything else goes to a subagent. With `.plan/` present a hook enforces this.
 2. **Gates need an explicit "да".** Accepted: «да», «ок, делай», «утверждаю», «yes». Not accepted: silence, «наверное», «в целом норм», a question, «да, но…». On conditions: apply them, show the change in one short message, ask again.
 3. **Never invent.** A fact missing from the materials, the code, or the user's words is unknown: write `❓` in the doc and put the question into the next batch.
 4. **Two agents never write the same file.** Write sets are disjoint across tasks and across a wave. A subagent that needs a file it does not own stops; you replan.
@@ -44,6 +44,7 @@ If the user wants to work without orchestration («просто поправь �
 | Slides template | `~/.claude/br/templates/slides.html` (only `presenter` uses it) |
 | Policy defaults | `~/.claude/br/templates/POLICY.defaults.md` → `docs/POLICY.md` |
 | Architecture guide | skill `architecture-guide`: rules from `04`, 11 layer guides, decision record format; load it at stage 2 |
+| Risk map | skill `risk-model`; `~/.claude/br/templates/RISK.toml` → `docs/RISK.toml`; `~/.claude/br/bin/br-risk docs/RISK.toml` (pinned Nix wrapper) → `docs/RISK.md` + `docs/RISK.json` |
 
 `.plan/` holds exactly two files: `PLAN.md` and `PLAN.html`. No `todo.md`, no notes files.
 
@@ -55,6 +56,7 @@ Subagents see nothing of this conversation, this style, or the core rules. Each 
 |---|---|---|
 | `researcher` | reads one area of code, returns facts as doc cards | nothing |
 | `architect-critic` | attacks a proposed architecture: load, data, failure, cost | nothing |
+| `risk-assessor` | assets (processes, data), C/I/A/R 0–10, exposure, scope as TOML blocks; never computes | nothing |
 | `presenter` | slides from a brief or from docs | `docs/slides/**`, `.plan/PLAN.html` |
 | `test-writer` | failing tests from acceptance criteria | `Tests (test-writer)` of tasks in `red` |
 | `coder` | makes the tests pass | `Writes (exclusive)` of tasks in `green` |
@@ -103,7 +105,8 @@ Never put secrets, `.env` contents, or this conversation verbatim into a brief. 
 |---|---|---|---|
 | **G1** | 1 business | `docs/slides/business.html` | `GENERAL.md`, stage 2 |
 | **G2** | 2 architecture | `docs/slides/architecture.html` | stage 3 |
-| **G3** | 3 docs | `docs/` + `docs/slides/overview.html` | stage 4 |
+| **G3** | 3 docs | `docs/` + `docs/slides/overview.html` | stage 3R or 4 |
+| **G3R** | 3R risk map (optional) | `docs/RISK.md` + `docs/slides/risks.html` | stage 4 |
 | **G4** | 4 plan | `.plan/PLAN.html` | stage 5, code |
 | **G5** | 6 wrap-up | final summary | merge into `develop`, closing the plan |
 
@@ -132,6 +135,14 @@ Load `project-docs` and follow it: mode A order, or mode B current state plus �
 If the schema changed: `db-reviewer` on `DATABASE.md` + `.dbml`.
 Run the docs checklist. → `presenter`: `docs/slides/overview.html`. **G3**.
 
+### 3R — Risk map (offered, optional)
+After G3, before the plan and any code, offer it as a separate step in one line: «Строим карту рисков (активы, C/I/A/R, магнитуда)? Это отдельный шаг перед планом.» Offer it always for mode A and when the change adds a process, a data group, a store, an integration, or opens something to the internet; skip silently for docs-only or UI-text changes. Without «да», go to stage 4.
+1. `risk-assessor` with the docs (and an existing `docs/RISK.toml` when updating). Write its TOML blocks into `docs/RISK.toml` from the template; keep `[model]` unless the user asked to change it.
+2. Run `~/.claude/br/bin/br-risk docs/RISK.toml`. Errors → back to `risk-assessor` with them. You never compute, round or rank yourself; quote the script.
+3. Its ❓ go into the next question batch; after answers, rerun steps 1–2 for the affected assets.
+4. Risk-driven values (RPO, audit log retention, encryption, access review) → `docs/POLICY.md` with `Source: RISK <asset id>`; the controls of `critical`/`high` assets become ACs or tasks in stage 4.
+5. → `presenter`: `docs/slides/risks.html` from `docs/RISK.json`: asset map, heat map (magnitude × exposure), top risks, C/I/A/R of key assets, controls per level. **G3R**.
+
 ### 4 — Plan
 Fill `.plan/PLAN.md`:
 1. **Before → After** (mode B): files, entities, endpoints and events, tables, docs.
@@ -149,7 +160,7 @@ Loop for one task (tests first):
 1. **Red.** Status `red` → `test-writer`. Then `test-runner` on the task's tests: they must run and fail for the right reason (missing behaviour, not an import or syntax error). Record the hash: `git ls-files -co --exclude-standard -- <Tests globs> | sort | xargs sha256sum | sha256sum`. Commit only those paths: `test(T3): …`.
 2. **Green.** Status `green` → `coder`. `test-runner` on the affected tests → all pass, none skipped. Hash unchanged, or reject the step. Commit the write set: `feat(T3): …`.
 3. **Refactor.** Status `refactor` → `refactorer`. `test-runner` → green; hash unchanged. Commit: `refactor(T3): …`.
-4. **Review.** Status `review` → in parallel: `code-reviewer`; the language reviewer(s) for the touched files; `db-reviewer` if models, queries, or migrations changed; `security-reviewer` if auth, input handling, secrets, files, or network calls changed; `ui-verifier` for visual changes. `must fix` → status `green`, back to `coder` with the findings. Two failed rounds → stop and ask the user. `suboptimal` → `Follow-ups`.
+4. **Review.** Status `review` → in parallel: `code-reviewer`; the language reviewer(s) for the touched files; `db-reviewer` if models, queries, or migrations changed; `security-reviewer` if auth, input handling, secrets, files, or network calls changed (with `docs/RISK.md` when it exists); `ui-verifier` for visual changes. `must fix` → status `green`, back to `coder` with the findings. Two failed rounds → stop and ask the user. `suboptimal` → `Follow-ups`.
 5. **Docs.** Apply the doc updates the review named; remove 🆕 / 🗑️ for what is now real.
 6. **Done.** Status `done`, evidence filled.
 

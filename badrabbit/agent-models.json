@@ -92,6 +92,10 @@
     "nix-test-runner": {
       "model": "claude-sonnet-5-5",
       "effort": "medium"
+    },
+    "risk-assessor": {
+      "model": "claude-opus-5-5",
+      "effort": "high"
     }
   }
 }

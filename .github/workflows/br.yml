@@ -27,7 +27,7 @@ jobs:
         run: python3 badrabbit/tools/validate.py badrabbit --repo .
       - name: Validator and measure_tokens tests
         working-directory: badrabbit/tools
-        run: python3 -m unittest -v test_validate test_measure_tokens
+        run: python3 -m unittest -v test_validate test_measure_tokens test_risk_score
       - name: Hook tests
         env:
           GIT_AUTHOR_NAME: ci
@@ -55,12 +55,12 @@ jobs:
       - name: br payload layout
         run: |
           nix build .#ecc-payload-br -L
-          echo "agents:   $(ls result/claude/agents | wc -l) (expected 23)"
-          echo "skills:   $(ls result/claude/skills | wc -l) (expected 37)"
+          echo "agents:   $(ls result/claude/agents | wc -l) (expected 24)"
+          echo "skills:   $(ls result/claude/skills | wc -l) (expected 38)"
           echo "rules:    $(ls result/claude/rules/br | wc -l) (expected 16)"
           echo "commands: $(ls result/claude/commands | wc -l) (expected 24)"
-          [ "$(ls result/claude/agents | wc -l)" -eq 23 ]
-          [ "$(ls result/claude/skills | wc -l)" -eq 37 ]
+          [ "$(ls result/claude/agents | wc -l)" -eq 24 ]
+          [ "$(ls result/claude/skills | wc -l)" -eq 38 ]
           [ "$(ls result/claude/rules/br | wc -l)" -eq 16 ]
           [ "$(ls result/claude/commands | wc -l)" -eq 24 ]
           [ "$(grep -rl BR-ORCHESTRATOR-STYLE-ACTIVE result/ | wc -l)" -eq 1 ]
