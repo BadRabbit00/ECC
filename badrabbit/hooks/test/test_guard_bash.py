@@ -282,6 +282,98 @@ class NixOnly(unittest.TestCase):
         self.assertIn("Nix wrapper", reason(res))
         self.assertFalse(denied(bash("cat ~/.claude/skills/arena/SKILL.md")))
 
+    # ---- round 2: review findings (bypasses and false denials)
+
+    def assert_blocked(self, cmds, mention=""):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                got = self.nix_only(cmd)
+                self.assertIsNotNone(got, cmd)
+                self.assertIn(mention, got, cmd)
+
+    def assert_clean(self, cmds):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(self.nix_only(cmd), cmd)
+
+    def test_skill_script_behind_flake_refs_is_blocked(self):
+        self.assert_blocked(["nix shell nixpkgs#hello -c ~/.claude/skills/x/y",
+                             "nix develop .#x -c sh -c 'python3 ~/.claude/skills/x/y.py'",
+                             "nix run nixpkgs#bash -- -c \"~/.claude/skills/x/y.sh\"",
+                             "nix run nixpkgs#python3 -- ~/.claude/skills/x/y.py"], "Nix wrapper")
+        self.assert_clean(["echo a#b"])        # a # inside a word is not a flake ref and not a deny
+
+    def test_interpreter_in_substitutions_and_compound_forms_is_blocked(self):
+        self.assert_blocked(["x=$(python3 x.py)", "echo \"$(python3 x.py)\"", "echo \"`python3 x`\"",
+                             "(python3 x.py)", "{ python3 x.py; }", "cat <(python3 x)",
+                             "if true; then python3 x; fi", "for i in 1; do python3 x; done", "! python3 x"],
+                            "nix develop -c")
+
+    def test_skill_script_in_substitution_is_blocked(self):
+        self.assert_blocked(["x=$(~/.claude/skills/foo/x.sh)"], "Nix wrapper")
+
+    def test_eval_and_variable_command_heads_are_blocked(self):
+        self.assert_blocked(['eval "python3 x"', "p=python3; $p x", "${PYTHON:-python3} x"], "nix develop -c")
+
+    def test_shell_option_clusters_and_other_shells_are_blocked(self):
+        self.assert_blocked(["bash -lc 'python3 x'", "bash -ec 'python3 x'", "bash -l -c 'python3 x'",
+                             "bash --norc -c 'python3 x'", "bash -o pipefail -c 'python3 x'",
+                             "dash -c 'python3 x'", "ksh -c 'python3 x'"], "nix develop -c")
+
+    def test_skill_script_inside_shell_option_cluster_is_blocked(self):
+        self.assert_blocked(["nix develop -c bash -lc 'cd ~/.claude/skills/x && ./y'"], "Nix wrapper")
+
+    def test_wrappers_with_options_do_not_hide_the_interpreter(self):
+        self.assert_blocked(["env -i python3 x", "env -u FOO python3 x", 'env -S "python3 x"', "env -- python3 x",
+                             "sudo -u root python3 x", "sudo -E bash -c 'python3 x'", "nice -n 5 python3 x",
+                             "timeout 5 python3 x", "timeout -k 2 5 python3 x"], "nix develop -c")
+
+    def test_arg_runners_do_not_hide_the_interpreter(self):
+        self.assert_blocked(["xargs -n1 python3 x", r"find . -name '*.py' -exec python3 {} \;"], "nix develop -c")
+
+    def test_arg_runners_and_source_do_not_hide_skill_scripts(self):
+        self.assert_blocked(["timeout 5 ~/.claude/skills/x/y.sh", "xargs ~/.claude/skills/x/y.sh",
+                             "source ~/.claude/skills/x/y.sh", ". ~/.claude/skills/x/y.sh"], "Nix wrapper")
+
+    def test_redirections_do_not_hide_the_interpreter(self):
+        self.assert_blocked(["python3>out x", "python3</dev/null", "2>&1 python3 x", ">out python3 x"],
+                            "nix develop -c")
+
+    def test_skill_paths_are_normalised(self):
+        self.assert_blocked(["~/.claude//skills/x/y", "~/.claude/./skills/x/y", "$HOME/./.claude/skills/x/y",
+                             "~/.claude/../.claude/skills/x/y", "/home/other/.claude/skills/x/y",
+                             "node --require=$HOME/.claude/skills/x/y.js",
+                             "/nix/store/abc-home-manager-files/.claude/skills/foo/x.sh",
+                             "/nix/store/abc-x/home-files/.codex/skills/foo/x.sh"], "Nix wrapper")
+
+    def test_nix_shell_run_and_global_nix_options_are_understood(self):
+        self.assert_blocked(['nix-shell -p python3 --run "~/.claude/skills/x/y.sh"',
+                             "nix --extra-experimental-features flakes develop -c sh -c '~/.claude/skills/x/y.sh'"],
+                            "Nix wrapper")
+        # the same wrappers around a plain interpreter are fine
+        self.assert_clean(['nix-shell -p python3 --run "python3 x.py"',
+                           "nix --extra-experimental-features flakes develop -c python3 x.py"])
+
+    def test_versioned_and_exotic_interpreter_names_are_blocked(self):
+        self.assert_blocked(["python3.14t x", "pypy3.10 x", "ruby3.2 x", "perl5.38 x", "php8.2 x", "lua5.4 x",
+                             "luajit-2.1 x", "nodejs18 x", "ipython x", "tsx x", "ts-node x"], "nix develop -c")
+
+    def test_more_launchers_are_blocked(self):
+        self.assert_blocked(["uv tool run x", "uv --directory . run x", "npm exec x", "pnpm exec x", "yarn dlx x",
+                             "pipx run x", "pdm run x", "hatch run x", "bundle exec x", "conda run x"],
+                            "nix develop -c")
+
+    def test_heredoc_body_is_data_not_commands(self):
+        self.assert_clean(["cat > f <<'EOF'\npython3 x.py\nEOF",
+                           "git commit -F - <<'EOF'\nnotes\nnode server.js\nEOF",
+                           "cat <<EOF > f\nruby x\nEOF"])
+
+    def test_command_after_heredoc_is_still_checked(self):
+        self.assert_blocked(["cat <<'EOF' > f\nit's\nEOF\npython3 x.py"], "nix develop -c")
+
+    def test_comment_is_not_a_command(self):
+        self.assert_clean(["echo ok # then; python3 x"])
+
 
 if __name__ == "__main__":
     unittest.main()
