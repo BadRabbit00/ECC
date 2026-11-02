@@ -431,6 +431,40 @@ class NixOnly(unittest.TestCase):
         # ...but a variable that may hold an interpreter still is
         self.assert_blocked(["p=python3; $p x", "${PYTHON:-python3} x", "$(which python3) x"], "nix develop -c")
 
+    # ---- round 4: heredocs through pipes, cd chains, export/declare, length cap
+
+    def test_heredoc_or_herestring_fed_to_a_shell_through_a_pipe_is_checked(self):
+        self.assert_blocked(["cat <<EOF | bash\npython3 x\nEOF",
+                             "cat <<EOF | sudo bash\nnode x\nEOF",
+                             "source /dev/stdin <<EOF\npython3 x\nEOF",
+                             "bash <<< 'python3 x'"], "nix develop -c")
+        self.assert_blocked(["cat <<'EOF' | sh\n~/.claude/skills/x/y.sh\nEOF",
+                             'sh <<< "~/.claude/skills/x/y.sh"'], "Nix wrapper")
+        # a heredoc piped into a non-shell is still data
+        self.assert_clean(["cat <<EOF | tee f\npython3 x\nEOF", "cat <<EOF | grep py\npython3 x\nEOF"])
+
+    def test_cd_chains_keep_the_skill_directory_taint(self):
+        self.assert_blocked(["cd ~/.claude/skills/foo && cd bar && ./x.sh",
+                             "cd ~/.claude/skills && cd foo && ./x.sh",
+                             "cd ~/.claude/skills/foo && cd .. && ./x.sh",
+                             "cd ~/.claude && cd skills && ./foo/x.sh"], "Nix wrapper")
+        # cd out of the skill directory clears the taint
+        self.assert_clean(["cd ~/.claude/skills/foo && cd /tmp && ./x.sh"])
+
+    def test_export_and_declare_assignments_do_not_hide_the_interpreter(self):
+        self.assert_blocked(["export p=python3; $p x", "declare p=python3; $p x"], "nix develop -c")
+
+    def test_overlong_command_is_denied_quickly_and_a_long_one_is_allowed(self):
+        import time
+        self.assert_clean(["true ; " * (50_000 // len("true ; "))])
+        cmd = "true ; " * (300_000 // len("true ; "))
+        start = time.perf_counter()
+        got = self.nix_only_no_crash(cmd)
+        elapsed = time.perf_counter() - start
+        self.assertIsNotNone(got)
+        self.assertIn("too long", got)
+        self.assertLess(elapsed, 1.0, f"took {elapsed:.2f}s")
+
 
 if __name__ == "__main__":
     unittest.main()
