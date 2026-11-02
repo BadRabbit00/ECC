@@ -1,0 +1,81 @@
+# Risk map source — docs/RISK.toml. Skill `risk-model` explains every field.
+# The model fills assets, scores (integers 0–10) and reasons. It never computes numbers:
+#   ~/.claude/br/bin/br-risk docs/RISK.toml   → docs/RISK.md + docs/RISK.json
+# Assets are data and business processes only: no computers, no people.
+
+[project]
+name = "<project name>"
+
+# Defaults of the model. Change only with the user's agreement and say why in docs/POLICY.md.
+[model]
+bonus_weight = 0.1                                  # weight of the three non-max axes
+scope = { one = 1.0, several = 1.1, all = 1.2 }     # one process / several / the whole business
+levels = [[8, "critical"], [6, "high"], [4, "medium"], [2, "low"], [0, "info"]]
+
+# Minimum controls per risk level. Copied into docs/RISK.md; trim or extend per project.
+[controls]
+critical = [
+  "encryption at rest and in transit; keys outside the database",
+  "audit log of every read and change, kept per POLICY",
+  "backups with RPO ≤ 15 min, restore tested every month",
+  "access by role and by object, reviewed quarterly",
+  "security-reviewer on every change that touches the asset",
+  "no single point of failure on the path that serves it",
+]
+high = [
+  "encryption in transit; at rest for personal or payment data",
+  "audit log of changes",
+  "daily backups, restore tested every quarter",
+  "access by role and by object",
+  "security-reviewer on changes to its endpoints and schema",
+]
+medium = [
+  "access by role",
+  "daily backups",
+  "input validation and rate limits on its endpoints",
+]
+low = ["standard project rules"]
+info = ["no extra controls"]
+
+# One [[process]] per business process from docs/GENERAL.md.
+[[process]]
+id = "P-01"
+name = "<process name>"
+owner = "<service>"
+scope = "several"                 # one | several | all
+C = 0
+I = 0
+A = 0
+R = 0
+exposure = 0
+exposure_why = "<who can reach it: internet without login, customers after login, staff, internal only; third parties>"
+sources = ["docs/GENERAL.md#<anchor>"]
+uses = [{ data = "D-01", access = "rw" }]   # access: r | w | rw
+
+[process.why]
+C = "<what a leak of what this process handles would cost>"
+I = "<what wrong or tampered results would cost>"
+A = "<what an outage would cost, and how long the business tolerates it>"
+R = "<which law, regulator or contract applies, or 'none'>"
+
+# One [[data]] per group of data: entity group, files, secrets and keys, logs.
+[[data]]
+id = "D-01"
+name = "<data asset name>"
+kind = "data"                     # data | file | secret | log
+stores = ["<db.table or bucket/prefix>"]
+volume = "<records now / growth>"
+scope = "several"
+C = 0
+I = 0
+A = 0
+R = 0
+exposure = 0
+exposure_why = "<how it is reached>"
+sources = ["docs/DATABASE.md#<table>"]
+
+[data.why]
+C = "<...>"
+I = "<...>"
+A = "<...>"
+R = "<...>"

@@ -172,6 +172,8 @@ def main() -> int:
         n = len(list((claude / d).glob("*.md")))
         if n != want:
             fail(f"{d}: {n} files, expected {want}")
+    if not (claude / "br/bin/br-risk").exists() or not (claude / "br/templates/RISK.toml").is_file():
+        fail("br/bin/br-risk or br/templates/RISK.toml missing (risk-model needs both)")
     if not (claude / "skills/project-docs/templates/example_db.dbml").is_file():
         fail("skills/project-docs/templates/example_db.dbml missing")
 

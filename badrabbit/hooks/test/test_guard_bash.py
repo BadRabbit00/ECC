@@ -247,7 +247,8 @@ class NixOnly(unittest.TestCase):
 
     def test_skill_wrapper_in_nix_store_bin_is_allowed(self):
         for cmd in ["/nix/store/abc-unslop-py/bin/unslop-py structure_scan",
-                    "/nix/store/abc-skills-runner/bin/skill-run --all"]:
+                    "/nix/store/abc-skills-runner/bin/skill-run --all",
+                    "~/.claude/br/bin/br-risk docs/RISK.toml", "~/.claude/br/bin/br-risk docs/RISK.toml --check"]:
             with self.subTest(cmd=cmd):
                 self.assertIsNone(self.nix_only(cmd), cmd)
 

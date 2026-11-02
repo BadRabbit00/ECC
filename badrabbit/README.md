@@ -24,11 +24,13 @@ badrabbit/
 ├── rules/                       # path-scoped rules → ~/.claude/rules/br/
 ├── skills/                      # br skills → ~/.claude/skills/
 ├── hooks/                       # hook scripts (Python) + hooks.json + tests
-├── templates/                   # PLAN.md, POLICY.defaults.md, slides.html — used by the orchestrator
+├── templates/                   # PLAN.md, POLICY.defaults.md, RISK.toml, slides.html — used by the orchestrator
 ├── tools/
 │   ├── validate.py              # structural checks; runs inside the payload build
 │   ├── validate.json            # limits and exemptions for validate.py
-│   └── test_validate.py
+│   ├── test_validate.py
+│   ├── risk_score.py            # risk-map calculator (magnitude, risk, levels); installed as ~/.claude/br/bin/br-risk
+│   └── test_risk_score.py
 └── _templates/                  # how to write an agent / rule / skill — NOT installed
 ```
 
