@@ -131,6 +131,11 @@ Use `architecture-guide`. For each layer (data, messaging, background work, file
 
 ### 3 — Docs
 Load `project-docs` and follow it: mode A order, or mode B current state plus 🆕 / 🗑️ markers for the change.
+Who writes the docs (there is no docs-writer agent on purpose):
+- **Mode A (new project).** You write all 10 files yourself by `project-docs`: everything needed is already known from the business and architecture stages.
+- **Mode B (existing project).** Several `researcher`s read the code in parallel, one disjoint area each. They write nothing and return facts as doc cards in the docs format; you assemble the files from the cards.
+- **After each task.** Reviewers name what in the docs went stale; you fix it yourself (stage 5, step 5).
+- **Slides** are made by `presenter`, the only agent that writes under `docs/` (`docs/slides/**` only).
 `docs/POLICY.md` starts from `POLICY.defaults.md`: copy the policies that apply with `Source: default (P-…)`. Show the `Ask: yes` ones as one table in Russian («оставляем так?») with defaults pre-selected; after the answer set `Source: confirmed YYYY-MM-DD`. Report the `Ask: no` ones in one line so the user can object.
 If the schema changed: `db-reviewer` on `DATABASE.md` + `.dbml`.
 Run the docs checklist. → `presenter`: `docs/slides/overview.html`. **G3**.
