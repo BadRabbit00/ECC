@@ -374,6 +374,63 @@ class NixOnly(unittest.TestCase):
     def test_comment_is_not_a_command(self):
         self.assert_clean(["echo ok # then; python3 x"])
 
+    # ---- round 3: nesting depth, option clusters with -o, stdin shells, pipes into shells, cd into skills
+
+    NESTING = 'echo "$(' * 1000
+
+    def nix_only_no_crash(self, cmd):
+        try:
+            return self.nix_only(cmd)
+        except RecursionError:
+            self.fail("check_nix_only raised RecursionError on deeply nested input")
+
+    def test_deeply_nested_command_is_denied_not_crashed(self):
+        got = self.nix_only_no_crash("true ; " + self.NESTING)
+        self.assertIsNotNone(got)
+        self.assertIn("nested", got)
+
+    def test_deep_nesting_cannot_hide_a_bare_interpreter_from_run(self):
+        bc = self._bash_checks()
+        from brhooks.common import Event
+        cmd = "python3 x.py ; " + self.NESTING
+        ev = Event(raw={}, tool="Bash", tool_input={"command": cmd}, cwd=Path(tempfile.gettempdir()))
+        try:
+            got = bc.run(ev)
+        except RecursionError:
+            self.fail("bash_checks.run raised RecursionError on deeply nested input")
+        self.assertIsNotNone(got)
+
+    def test_deep_nesting_cannot_hide_a_protected_push_from_the_hook(self):
+        res = bash("git push origin main ; " + self.NESTING)
+        self.assertTrue(denied(res))
+
+    def test_option_clusters_with_dash_o_before_dash_c_are_blocked(self):
+        self.assert_blocked(["bash -euo pipefail -c 'python3 x'", "bash -eo pipefail -c 'python3 x'"],
+                            "nix develop -c")
+        self.assert_blocked(["sh -euo pipefail -c '~/.claude/skills/x/y.sh'"], "Nix wrapper")
+
+    def test_script_fed_to_a_shell_on_stdin_is_checked(self):
+        self.assert_blocked(["bash <<EOF\npython3 x\nEOF"], "nix develop -c")
+        self.assert_blocked(["sh <<'EOF'\n~/.claude/skills/x/y.sh\nEOF",
+                             "nix develop -c bash <<EOF\n~/.claude/skills/x/y.sh\nEOF"], "Nix wrapper")
+        # a heredoc into a non-shell is still data
+        self.assert_clean(["cat <<EOF > f\npython3 x\nEOF", "tee f <<EOF\nnode x\nEOF"])
+
+    def test_skill_script_piped_into_an_interpreter_or_shell_is_blocked(self):
+        self.assert_blocked(["cat ~/.claude/skills/x/y.sh | bash", "cat ~/.codex/skills/x/y.py | python3"],
+                            "Nix wrapper")
+
+    def test_cd_into_a_skill_directory_taints_the_following_commands(self):
+        self.assert_blocked(["pushd ~/.claude/skills/foo > /dev/null && ./x.sh",
+                             "cd ~/.claude/skills/foo && nix develop -c python3 y.py",
+                             "cd ~/.claude/skills/foo && source x.sh"], "Nix wrapper")
+
+    def test_variable_heads_that_cannot_be_python_are_not_denied(self):
+        self.assert_clean(["$EDITOR f", "$PWD/x.sh", "$GOPATH/bin/tool", '"$REPO"/bin/x',
+                           "[[ $x =~ ^(a|b)$ ]] && echo y"])
+        # ...but a variable that may hold an interpreter still is
+        self.assert_blocked(["p=python3; $p x", "${PYTHON:-python3} x", "$(which python3) x"], "nix develop -c")
+
 
 if __name__ == "__main__":
     unittest.main()
