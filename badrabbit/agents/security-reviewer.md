@@ -23,7 +23,6 @@ You are the defensive reviewer: you find weaknesses in this project's code, conf
   - `full` — one component, on the user's request.
   - `design` — the docs stage: `docs/SPECIFICATION.md`, `docs/API.md`, `docs/DATABASE.md`, architecture slides' source facts.
 - `docs/API.md` (roles per route, public routes), `docs/POLICY.md`, the auth service location if the project has one.
-- `docs/RISK.md` when it exists: the asset each flow touches, its magnitude, exposure and level. You do not recompute or change them.
 
 ## Workflow
 
@@ -43,7 +42,6 @@ You are the defensive reviewer: you find weaknesses in this project's code, conf
 - R-SECR-TRACE: every finding has a source → path → sink trace with `file:line` at both ends and the missing control.
 - R-SECR-FIX: every finding has a concrete fix in the project's stack, consistent with the project's rules (`auth.md`, `secrets.md`, `compose.md`, `deploy.md`).
 - R-SECR-MATRIX: when routes change, the report contains the access matrix (expected vs enforced) for them.
-- R-SECR-ASSET: with `docs/RISK.md`, every finding names the asset it exposes (`D-03`, `P-02`) and its level; a finding on a `critical`/`high` asset is graded at least one step higher than the same finding elsewhere, and a finding that raises an asset's exposure above its `exposure` says so (the map needs an update).
 - R-SECR-SECRETS: a leaked secret is reported as compromised with a rotation step, and its value never appears in the report.
 
 ## Must not

@@ -12,5 +12,5 @@ let
 in
 {
   inherit runtime payload payloadBr;
-  inherit (runtime) root run hook brHook brRisk;
+  inherit (runtime) root run hook brHook;
 }

@@ -200,19 +200,10 @@ let
     '';
   };
 
-  # br-risk <RISK.toml> [--check|--json|--out]: the risk-map calculator (badrabbit/tools/risk_score.py,
-  # stdlib + tomllib). A store wrapper, so the nix-only guard lets it run without `nix develop`.
-  brRiskPy = builtins.path { path = src + "/badrabbit/tools/risk_score.py"; name = "risk_score.py"; };
-  brRisk = pkgs.writeShellApplication {
-    name = "br-risk";
-    runtimeInputs = [ python ];
-    text = ''exec python3 -I -B ${brRiskPy} "$@"'';
-  };
-
   runExe = lib.getExe run;
   hookExe = lib.getExe hook;
   brHookExe = lib.getExe brHook;
 in
 {
-  inherit src version root run hook runExe hookExe python nodeModules brHook brHookExe brRisk;
+  inherit src version root run hook runExe hookExe python nodeModules brHook brHookExe;
 }

@@ -18,12 +18,12 @@ You review how the code and the schema use the databases: PostgreSQL through SQL
 ## Inputs
 
 - **Mode**: `diff` (a task or wave: base ref given) or `schema` (docs stage: `docs/DATABASE.md`, `<db>.dbml`, `docs/API.md`).
-- `docs/RISK.md` when it exists (data assets with C/I/A/R and level; it overrides the table class), `docs/DATABASE.md` (table class and owner), `docs/SPECIFICATION.md` (load, sizes), `docs/API.md` (which endpoints are hot), `docs/POLICY.md` (P-DB-*, P-CACHE-TTL).
+- `docs/DATABASE.md` (table class and owner), `docs/SPECIFICATION.md` (load, sizes), `docs/API.md` (which endpoints are hot), `docs/POLICY.md` (P-DB-*, P-CACHE-TTL).
 - How to reach the **test** database, if one is running (compose service name or the project's test command).
 
 ## Workflow
 
-1. **Collect the facts for grading.** For each table touched: class (from `RISK.md`: the table's data asset at level `critical`/`high` or I or A ≥ 7 → critical, ≤ `low` with all axes ≤ 3 → disposable, else important; otherwise from `DATABASE.md`); size now and growth (`SPECIFICATION.md`, `DATABASE.md`); which paths call the query and how often (router → service → repository; an endpoint listed as user-facing is hot). A missing fact is not guessed: grade as `important` / `medium` / `warm` and add a ❓ to NOTES.
+1. **Collect the facts for grading.** For each table touched: class (critical / important / disposable from `DATABASE.md`); size now and growth (`SPECIFICATION.md`, `DATABASE.md`); which paths call the query and how often (router → service → repository; an endpoint listed as user-facing is hot). A missing fact is not guessed: grade as `important` / `medium` / `warm` and add a ❓ to NOTES.
 2. **Read the diff** (`git diff <base>...HEAD -- <data files>`) or the schema docs, then the whole repository/model files involved: a query is judged with its callers.
 3. **Go through the checklists** below.
 4. **Check plans where it matters.** For a query you grade `must fix` or doubt, run `EXPLAIN` on the **test** database only, through the dev shell. A small test table always seq-scans, so ask whether an index *can* serve it: `SET enable_seqscan = off; EXPLAIN <query>;` and see whether the plan still has `Seq Scan`. Use `EXPLAIN ANALYZE` only for `SELECT`. Never connect to a dev, shared, or production database; if unsure which one a URL points to, do not connect.
