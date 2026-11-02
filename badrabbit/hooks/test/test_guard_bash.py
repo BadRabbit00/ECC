@@ -1,6 +1,10 @@
+import os
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
-from helpers import call, denied, git_repo, reason
+from helpers import HOOKS, call, denied, git_repo, reason
 
 
 def bash(cmd, **kw):
@@ -20,7 +24,7 @@ class HostInstall(unittest.TestCase):
 
     def test_allowed(self):
         for cmd in ["nix develop -c pytest -q", "nix shell nixpkgs#jq -c jq . f.json", "npm install",
-                    "pnpm add zod", "go build ./...", "cargo build", "python3 scripts/gen.py", "pip --version"]:
+                    "pnpm add zod", "go build ./...", "cargo build", "nix develop -c python3 scripts/gen.py", "pip --version"]:
             with self.subTest(cmd=cmd):
                 self.assertFalse(denied(bash(cmd)), cmd)
 
@@ -152,6 +156,131 @@ class TestsViaBash(unittest.TestCase):
 
     def test_reason_points_to_blocked(self):
         self.assertIn("STATUS: blocked", reason(bash("rm test/a.py", agent="coder")))
+
+
+class NixOnly(unittest.TestCase):
+    """check_nix_only: bare interpreters and agent-skill scripts must go through Nix."""
+
+    HOME = os.environ.get("HOME", "/root")
+
+    @staticmethod
+    def _bash_checks():
+        if str(HOOKS) not in sys.path:
+            sys.path.insert(0, str(HOOKS))
+        from brhooks import bash_checks
+        return bash_checks
+
+    def nix_only(self, cmd):
+        """Reason from check_nix_only, or None. A missing check is a test failure, not an import error."""
+        bc = self._bash_checks()
+        check = getattr(bc, "check_nix_only", None)
+        if check is None:
+            self.fail("brhooks.bash_checks.check_nix_only does not exist yet")
+        from brhooks.common import Event
+        return check(Event(raw={}, tool="Bash", tool_input={"command": cmd}, cwd=Path(tempfile.gettempdir())), cmd)
+
+    # ---- A. interpreters
+
+    def test_check_is_registered_after_host_install(self):
+        bc = self._bash_checks()
+        check = getattr(bc, "check_nix_only", None)
+        self.assertIsNotNone(check, "check_nix_only missing")
+        self.assertIn(check, bc.CHECKS)
+        self.assertGreater(bc.CHECKS.index(check), bc.CHECKS.index(bc.check_host_install))
+
+    def test_bare_interpreter_is_blocked(self):
+        for cmd in ["python3 script.py", "python script.py", "python2 script.py", "python3.12 script.py",
+                    "pypy3 script.py", "node build.js", "nodejs build.js", "bun run build.ts", "deno run x.ts",
+                    "ruby x.rb", "perl x.pl", "php x.php", "lua x.lua", "luajit x.lua", "Rscript x.R",
+                    "julia x.jl", "python3 --version", "/usr/bin/python3 x.py",
+                    "PYTHONPATH=. python3 -m pytest", "sudo python3 x.py", "env FOO=1 python3 x.py",
+                    "exec python3 x.py", "cd foo && python3 x.py", "ls | python3 x.py"]:
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(self.nix_only(cmd), cmd)
+
+    def test_bare_launcher_is_blocked(self):
+        for cmd in ["npx prettier .", "bunx prettier .", "uvx ruff check .", "uv run pytest", "pnpm dlx create-x",
+                    "poetry run pytest", "pipenv run pytest"]:
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(self.nix_only(cmd), cmd)
+
+    def test_interpreter_inside_shell_dash_c_is_blocked(self):
+        self.assertIsNotNone(self.nix_only("bash -c 'python3 x.py'"))
+        self.assertIsNotNone(self.nix_only("sh -c 'cd foo && node x.js'"))
+
+    def test_interpreter_reason_mentions_nix_develop(self):
+        for cmd in ["python3 script.py", "node build.js", "npx prettier .", "uv run pytest"]:
+            with self.subTest(cmd=cmd):
+                self.assertIn("nix develop -c", self.nix_only(cmd) or "")
+
+    def test_interpreter_wrapped_in_nix_is_allowed(self):
+        for cmd in ["nix develop -c python3 script.py", "nix develop .#montage-ml -c python3 x.py",
+                    "nix develop --command python3 x.py", "nix shell nixpkgs#python3 -c python3 x.py",
+                    "nix shell nixpkgs#nodejs -c node x.js", "nix run nixpkgs#python3 -- x.py",
+                    "nix develop -c npx prettier .", "nix develop -c uv run pytest",
+                    "/nix/store/abc-python3-3.14/bin/python3 x.py",
+                    "cd foo && nix develop -c python3 x.py"]:
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(self.nix_only(cmd), cmd)
+
+    def test_non_interpreter_commands_are_untouched(self):
+        for cmd in ["git status", "ls -la", "cat README.md", "grep -rn python3 .", "echo python3 x.py",
+                    "git commit -m 'run python3 x.py'"]:
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(self.nix_only(cmd), cmd)
+
+    # ---- B. agent skill scripts
+
+    def test_skill_script_is_blocked_with_nix_wrapper_reason(self):
+        for cmd in ["~/.claude/skills/arena/bracket.py", "bash ~/.codex/skills/foo/run.sh",
+                    "sh /nix/store/xyz-emil-skills/animate/scripts/x.sh",
+                    f"{self.HOME}/.gemini/config/skills/x/tool.py --flag",
+                    f"{self.HOME}/.claude/skills/arena/bracket.py",
+                    "~/.gemini/config/skills/x/tool.py --flag",
+                    "$CLAUDE_SKILL_DIR/run.sh", "${CLAUDE_SKILL_DIR}/run.sh",
+                    "bash \"${CLAUDE_SKILL_DIR}/run.sh\"",
+                    "python3 \"${CLAUDE_SKILL_DIR}/bracket.py\"",
+                    "nix develop -c python3 ~/.claude/skills/x/y.py",
+                    "cd /tmp && bash ~/.claude/skills/x/run.sh"]:
+            with self.subTest(cmd=cmd):
+                self.assertIn("Nix wrapper", self.nix_only(cmd) or "", cmd)
+
+    def test_skill_wrapper_in_nix_store_bin_is_allowed(self):
+        for cmd in ["/nix/store/abc-unslop-py/bin/unslop-py structure_scan",
+                    "/nix/store/abc-skills-runner/bin/skill-run --all"]:
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(self.nix_only(cmd), cmd)
+
+    def test_reading_skill_files_is_allowed(self):
+        for cmd in ["cat ~/.claude/skills/arena/SKILL.md", "grep -rn foo ~/.claude/skills",
+                    "ls ~/.codex/skills", "head -n 5 ${CLAUDE_SKILL_DIR}/SKILL.md",
+                    "cat /nix/store/xyz-emil-skills/animate/SKILL.md"]:
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(self.nix_only(cmd), cmd)
+
+    # ---- C. ordering and the end-to-end hook
+
+    def test_inline_python_keeps_its_existing_reason(self):
+        bc = self._bash_checks()
+        from brhooks.common import Event
+        cmd = 'python3 -c "print(1)"'
+        ev = Event(raw={}, tool="Bash", tool_input={"command": cmd}, cwd=Path(tempfile.gettempdir()))
+        self.assertIn("inline python", bc.run(ev) or "")
+        self.assertIn("inline python", reason(bash(cmd)))
+
+    def test_pip_install_keeps_its_existing_reason(self):
+        self.assertIn("pip install is not allowed", reason(bash("pip install requests")))
+
+    def test_hook_denies_bare_interpreter_and_allows_wrapped(self):
+        self.assertTrue(denied(bash("python3 script.py")))
+        self.assertIn("nix develop -c", reason(bash("python3 script.py")))
+        self.assertFalse(denied(bash("nix develop -c python3 script.py")))
+
+    def test_hook_denies_skill_script(self):
+        res = bash("bash ~/.codex/skills/foo/run.sh")
+        self.assertTrue(denied(res))
+        self.assertIn("Nix wrapper", reason(res))
+        self.assertFalse(denied(bash("cat ~/.claude/skills/arena/SKILL.md")))
 
 
 if __name__ == "__main__":
