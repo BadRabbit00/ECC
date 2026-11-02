@@ -157,7 +157,7 @@ INTERPRETER = re.compile(
 # A variable whose name or default value mentions one of these may hold an interpreter.
 INTERPRETER_HINT = re.compile(r"python|pypy|node|ruby|perl|php|lua|julia|deno|\bbun\b|interp|^py$|rscript", re.I)
 LAUNCHER = {"npx", "bunx", "uvx"}
-LAUNCHER_SUBCOMMANDS = {
+LAUNCHER_SUBCOMMANDS: dict[str, set[tuple[str, ...]]] = {
     "uv": {("run",), ("tool", "run")}, "pnpm": {("dlx",), ("exec",)}, "poetry": {("run",)},
     "pipenv": {("run",)}, "npm": {("exec",)}, "yarn": {("dlx",)}, "pipx": {("run",)}, "pdm": {("run",)},
     "hatch": {("run",)}, "bundle": {("exec",)}, "conda": {("run",)}, "pyenv": {("exec",)}, "mise": {("exec",)},
@@ -173,6 +173,8 @@ NIX_VALUE_OPTIONS = {"--extra-experimental-features": 1, "--experimental-feature
                      "--override-input": 2, "--update-input": 1, "--inputs-from": 1, "--profile": 1,
                      "--arg": 2, "--argstr": 2}
 MAX_DEPTH = 8
+MAX_COMMAND_LENGTH = 200_000
+DECLARATIONS = {"export", "declare", "local", "readonly", "typeset"}
 HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)(\w+)\2")
 SEPARATOR_TOKEN = re.compile(SEPARATOR)
 SUBST = "$__SUBST__"        # stands for a `$(…)` / backtick that is the command word of a segment
@@ -193,8 +195,21 @@ class Command:
 class Scan:
     """What earlier commands of the same command line did that later ones depend on."""
     assigned: dict[str, str] = field(default_factory=dict)   # shell variables set so far
-    in_skill_dir: bool = False                               # after `cd <skills dir>`
+    cwd: str | None = None                                   # directory after `cd`, as written; None if unknown
     substitution_ok: bool = False                            # inside `eval`: `$(…)` as a command is expected
+
+    @property
+    def in_skill_dir(self) -> bool:
+        return self.cwd is not None and _is_skill_path(self.cwd + "/")
+
+    def cd(self, arg: str) -> None:
+        """Track `cd ARG`: an absolute path sets the directory, a relative one extends a known one."""
+        if not arg or arg == "-":
+            self.cwd = None
+        elif arg.startswith(("/", "~", "$")):
+            self.cwd = arg
+        elif self.cwd is not None:
+            self.cwd = posixpath.normpath(f"{self.cwd}/{arg}")
 
 
 def _matching_paren(cmd: str, start: int) -> int:
@@ -380,18 +395,19 @@ def _unwrap_nix(w: list[str]) -> tuple[list[str], bool] | None:
     return None
 
 
-def _resolve(w: list[str]) -> list[str]:
-    """The command that finally runs: wrappers, `nix develop -c`, `busybox` peeled off."""
+def _resolve(w: list[str]) -> tuple[list[str], bool]:
+    """The command that finally runs (wrappers, `nix develop -c`, `busybox` peeled off) and whether Nix runs it."""
+    in_nix = False
     for _ in range(MAX_DEPTH):
         w = strip_env_and_wrappers(w)
         inner = _unwrap_nix(w) if w else None
         if inner is not None:
-            w = inner[0]
+            w, in_nix = inner[0], True
         elif w and Path(w[0]).name == "busybox":
             w = w[1:]
         else:
             break
-    return w
+    return w, in_nix
 
 
 def _find_exec_commands(w: list[str]) -> list[list[str]]:
@@ -458,6 +474,17 @@ def _reads_stdin_script(w: list[str]) -> bool:
     return (Path(w[0]).name in SHELLS or _is_interpreter(w)) and all(a.startswith("-") for a in w[1:])
 
 
+def _herestrings(w: list[str]) -> list[str]:
+    """Texts of `<<< 'text'` / `<<<text` in the words."""
+    out = []
+    for i, a in enumerate(w):
+        if a == "<<<" and i + 1 < len(w):
+            out.append(w[i + 1])
+        elif a.startswith("<<<") and len(a) > 3:
+            out.append(a[3:])
+    return out
+
+
 def _variable_head_reason(head: str, scan: Scan) -> str | None:
     """Deny a command word that is a bare variable or substitution that may hold an interpreter."""
     if head == SUBST or re.fullmatch(r"\$\(.*\)|`.*`", head):
@@ -474,32 +501,46 @@ def _variable_head_reason(head: str, scan: Scan) -> str | None:
     return NIX_VARIABLE_REASON if INTERPRETER_HINT.search(text) else None
 
 
-def _nix_commands(cmd: str, wrapped: bool, depth: int, in_skill_dir: bool = False, eval_ok: bool = False) -> str | None:
+def _nix_commands(cmd: str, wrapped: bool, depth: int, cwd: str | None = None, eval_ok: bool = False) -> str | None:
     if depth > MAX_DEPTH:
         return NIX_DEPTH_REASON
     try:
         commands = _split_commands(cmd.replace("\\\n", " "))
     except NestingError:
         return NIX_DEPTH_REASON
-    scan = Scan(in_skill_dir=in_skill_dir, substitution_ok=eval_ok)
+    scan = Scan(cwd=cwd, substitution_ok=eval_ok)
     pipeline_has_skill = False
+    pipeline_bodies: list[str] = []                            # heredoc bodies feeding the current pipeline
     for command in commands:
         raw = split_words(command.text, comments=False)
-        for word in raw:
+        assignments = raw
+        while assignments and assignments[0] in DECLARATIONS:  # `export p=python3`
+            assignments = assignments[1:]
+            while assignments and assignments[0].startswith("-"):
+                assignments = assignments[1:]
+        for word in assignments:
             m = re.fullmatch(r"(\w+)=(.*)", word)
             if not m:
                 break
             scan.assigned[m.group(1)] = m.group(2)
         w = strip_env_and_wrappers(raw)
-        final = _resolve(w)
+        final, in_nix = _resolve(w)
         if not command.piped:
             pipeline_has_skill = any(_is_skill_path(a) for a in final[1:])
-        elif pipeline_has_skill and final and _reads_stdin_script(final):
-            return NIX_SKILL_REASON                            # cat skill.sh | bash
+            pipeline_bodies = list(command.heredocs)
+        else:
+            if pipeline_has_skill and final and _reads_stdin_script(final):
+                return NIX_SKILL_REASON                        # cat skill.sh | bash
+            if final and Path(final[0]).name in SHELLS and _reads_stdin_script(final):
+                for body in pipeline_bodies:                   # cat <<EOF | bash
+                    reason = _nix_commands(body, wrapped or in_nix, depth + 1, scan.cwd)
+                    if reason:
+                        return reason
+            pipeline_bodies += command.heredocs
         if w and Path(w[0]).name in {"cd", "pushd"}:
-            scan.in_skill_dir = _is_skill_path(_first_argument(w[1:]))
+            scan.cd(_first_argument(w[1:]))
         elif w and Path(w[0]).name == "popd":
-            scan.in_skill_dir = False
+            scan.cwd = None
         reason = _nix_words(w, wrapped, depth, scan, command.heredocs)
         if reason:
             return reason
@@ -524,7 +565,7 @@ def _nix_words(w: list[str], wrapped: bool, depth: int, scan: Scan, heredocs: li
     if name == "busybox":
         return _nix_words(w[1:], wrapped, depth + 1, scan, heredocs)
     if name == "eval":
-        return _nix_commands(" ".join(w[1:]), wrapped, depth + 1, scan.in_skill_dir, eval_ok=True)
+        return _nix_commands(" ".join(w[1:]), wrapped, depth + 1, scan.cwd, eval_ok=True)
     if name == "xargs":
         i = 1
         while i < len(w) and w[i].startswith("-"):
@@ -535,9 +576,14 @@ def _nix_words(w: list[str], wrapped: bool, depth: int, scan: Scan, heredocs: li
     if name in SHELLS:
         script = _shell_script(w)
         if script is not None:
-            return _nix_commands(script, wrapped, depth + 1, scan.in_skill_dir)
-        for body in heredocs or []:                        # `bash <<EOF`: the body is a script
-            reason = _nix_commands(body, wrapped, depth + 1, scan.in_skill_dir)
+            return _nix_commands(script, wrapped, depth + 1, scan.cwd)
+        for body in (heredocs or []) + _herestrings(w):    # `bash <<EOF`, `bash <<< 'cmd'`: a script on stdin
+            reason = _nix_commands(body, wrapped, depth + 1, scan.cwd)
+            if reason:
+                return reason
+    if head in {"source", "."}:                            # `source /dev/stdin <<EOF`
+        for body in (heredocs or []) + _herestrings(w):
+            reason = _nix_commands(body, wrapped, depth + 1, scan.cwd)
             if reason:
                 return reason
     if not wrapped:
@@ -554,6 +600,8 @@ def _nix_words(w: list[str], wrapped: bool, depth: int, scan: Scan, heredocs: li
 
 
 def check_nix_only(ev: Event, cmd: str) -> str | None:
+    if len(cmd) > MAX_COMMAND_LENGTH:
+        return f"The command is too long ({len(cmd)} characters) to check. Split it into smaller commands."
     try:
         return _nix_commands(cmd, False, 0)
     except RecursionError:
