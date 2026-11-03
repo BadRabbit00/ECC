@@ -58,7 +58,7 @@ Reading code and docs to understand the task is always allowed.
 ## 5. Do not offload work
 
 - Run commands, builds, tests, and log reads yourself, or have subagents do it. Never ask the user to run something and paste the output.
-- Admin rights: run the command through an elevation prompt (`pkexec`, a sudo GUI prompt); the user only types the password.
+- Admin rights: the user's sudo needs no password — run `sudo -n <cmd>` directly; do not use pkexec or a GUI askpass.
 - Ask the user to act only when only they can: a 2FA code, a login in their browser, a physical button. Describe exactly one step.
 
 ## 6. Facts, not guesses
