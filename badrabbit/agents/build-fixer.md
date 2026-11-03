@@ -6,7 +6,7 @@ disallowedTools: Agent, Skill, mcp__*, WebFetch, WebSearch
 omitClaudeMd: true
 maxTurns: 30
 model: sonnet
-effort: high
+effort: medium
 ---
 
 # Build fixer

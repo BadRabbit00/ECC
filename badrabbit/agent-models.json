@@ -11,7 +11,7 @@
     },
     "coder": {
       "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "refactorer": {
       "model": "claude-sonnet-5-5",
@@ -23,27 +23,27 @@
     },
     "build-fixer": {
       "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "db-reviewer": {
       "model": "claude-opus-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "optimizer": {
-      "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "model": "claude-opus-5-5",
+      "effort": "medium"
     },
     "code-reviewer": {
       "model": "claude-opus-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "python-reviewer": {
       "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "go-reviewer": {
       "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "rust-reviewer": {
       "model": "claude-sonnet-5-5",
@@ -51,11 +51,11 @@
     },
     "ts-react-reviewer": {
       "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "flutter-dart-reviewer": {
       "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "security-reviewer": {
       "model": "claude-opus-5-5",
@@ -75,19 +75,19 @@
     },
     "nix-architect": {
       "model": "claude-opus-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "nix-engineer": {
       "model": "claude-sonnet-5-5",
-      "effort": "high"
+      "effort": "medium"
     },
     "nix-reviewer": {
       "model": "claude-opus-5-5",
-      "effort": "xhigh"
+      "effort": "high"
     },
     "nix-build-resolver": {
       "model": "claude-opus-5-5",
-      "effort": "xhigh"
+      "effort": "high"
     },
     "nix-test-runner": {
       "model": "claude-sonnet-5-5",

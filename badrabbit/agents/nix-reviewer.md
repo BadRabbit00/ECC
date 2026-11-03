@@ -6,7 +6,7 @@ disallowedTools: Agent, Skill, mcp__*, Write, Edit, MultiEdit, NotebookEdit, Web
 omitClaudeMd: true
 maxTurns: 30
 model: opus
-effort: xhigh
+effort: high
 ---
 
 # Nix reviewer

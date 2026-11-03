@@ -6,7 +6,7 @@ disallowedTools: Agent, Skill, mcp__*, Write, Edit, MultiEdit, NotebookEdit, Web
 omitClaudeMd: true
 maxTurns: 30
 model: sonnet
-effort: high
+effort: medium
 ---
 
 # TypeScript and React reviewer
