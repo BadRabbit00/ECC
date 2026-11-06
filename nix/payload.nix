@@ -92,7 +92,7 @@ stdenvNoCC.mkDerivation {
 
   meta = {
     description = "br payload for Claude Code: orchestrator style, isolated agents, path rules, br hooks";
-    homepage = "https://github.com/BadRabbit00/br";
+    homepage = "https://github.com/BadRabbit00/warren";
     license = lib.licenses.mit;
   };
 }

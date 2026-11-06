@@ -27,6 +27,7 @@ NIX_AGENT_SKILLS = {
     "nix-build-resolver": ["nix-debugging"],
     "nix-test-runner": ["nix-testing"],
 }
+ALLOWED_EFFORT = ["low", "medium", "high", "xhigh", "max"]
 REQUIRED_DISALLOWED = ["Agent", "Skill", "mcp__*"]
 CONTRACT_HEADING = "## Contract (all br subagents)"
 STYLE_MARKER = "BR-ORCHESTRATOR-STYLE-ACTIVE"
@@ -87,8 +88,15 @@ def main() -> int:
         if name not in models:
             fail(f"{name}: no entry in agent-models.json")
             continue
-        fm = put(fm, "model", models[name]["model"])
-        fm = put(fm, "effort", models[name]["effort"])
+        model, effort = str(models[name]["model"]), str(models[name]["effort"])
+        if not re.fullmatch(r"claude-[a-z0-9.-]+", model):
+            fail(f"{name}: bad model id {model!r}")
+            continue
+        if effort not in ALLOWED_EFFORT:
+            fail(f"{name}: bad effort {effort!r}")
+            continue
+        fm = put(fm, "model", model)
+        fm = put(fm, "effort", effort)
         fm = put(fm, "omitClaudeMd", "true")
         dis = as_list(get(fm, "disallowedTools"))
         fm = put(fm, "disallowedTools", ", ".join(dis + [t for t in REQUIRED_DISALLOWED if t not in dis]))
@@ -101,9 +109,18 @@ def main() -> int:
             fm = put(fm, "skills", "[" + ", ".join(skills) + "]")
         fm = [re.sub(r"\s*Use PROACTIVELY[^.]*\.", "", l) if l.startswith("description:") else l for l in fm]
         p.write_text(join(fm, "\n" + contract + body.lstrip("\n")))
+    for n in NIX_AGENT_SKILLS:
+        if not (agents_dir / f"{n}.md").is_file():
+            fail(f"{n}: listed in NIX_AGENT_SKILLS but agents/{n}.md is missing")
 
     # --- 4: hooks.json ---------------------------------------------------------------------------
-    hooks = json.loads((br / "hooks" / "hooks.json").read_text().replace("@BR_HOOK@", hook_exe))
+    # Parse first, substitute inside the command values only: a raw-text replace would also hit
+    # descriptions and break JSON if the path ever needed escaping.
+    hooks = json.loads((br / "hooks" / "hooks.json").read_text())
+    for entries in hooks["hooks"].values():
+        for e in entries:
+            for h in e["hooks"]:
+                h["command"] = h["command"].replace("@BR_HOOK@", hook_exe)
     (out / "hooks.json").write_text(json.dumps(hooks, indent=2, ensure_ascii=False) + "\n")
 
     # --- 5: self-checks --------------------------------------------------------------------------
@@ -129,6 +146,8 @@ def main() -> int:
         fail(f"style marker found in {hits}; expected only claude/output-styles/orchestrator.md")
 
     settings = json.loads((out / "settings.fragment.json").read_text())
+    if set(settings) != {"env", "outputStyle"}:
+        fail(f"settings.fragment.json: keys {sorted(settings)}, expected ['env', 'outputStyle']")
     if settings.get("env", {}).get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
         fail("settings.fragment.json: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH must be \"1\"")
     if settings.get("outputStyle") != "orchestrator":

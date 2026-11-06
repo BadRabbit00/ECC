@@ -153,14 +153,17 @@ class Validator:
             desc = str(fm.get("description", ""))
             if not desc:
                 self.err(p, "description missing")
-            # Fork agents get isolation fields, wording and the contract from nix/payload.py.
+            # buildIsolated agents get isolation fields from nix/payload.py at build time.
             built = name in self.cfg.get("buildIsolated", [])
-            if not built:
-                for word in self.cfg["forbiddenDescriptionWords"]:
-                    if word in desc.lower():
-                        self.err(p, f"description contains '{word}' (would make Claude auto-invoke)")
-                if fm.get("omitClaudeMd") is not True:
-                    self.err(p, "omitClaudeMd: true is required")
+            checked = desc
+            if built:
+                # Same substitution as nix/payload.py: the build strips this sentence.
+                checked = re.sub(r"\s*Use PROACTIVELY[^.]*\.", "", desc)
+            for word in self.cfg["forbiddenDescriptionWords"]:
+                if word in checked.lower():
+                    self.err(p, f"description contains '{word}' (would make Claude auto-invoke)")
+            if not built and fm.get("omitClaudeMd") is not True:
+                self.err(p, "omitClaudeMd: true is required")
             if not as_list(fm.get("tools")):
                 self.err(p, "explicit tools allowlist is required")
             if "Agent" in as_list(fm.get("tools")):
@@ -339,6 +342,26 @@ class Validator:
                 if skill not in available:
                     self.err(p, f"preloaded skill '{skill}' is not in skills/")
 
+    def check_exemptions(self) -> None:
+        """Stale exemptions silently weaken the checks, so every listed name must still exist."""
+        cfg_path = self.root / "tools" / "validate.json"
+        agents = {p.stem for p in (self.root / "agents").glob("*.md")}
+        skills = {p.parent.name for p in (self.root / "skills").glob("*/SKILL.md")}
+        for name in self.cfg.get("buildIsolated", []):
+            if name not in agents:
+                self.err(cfg_path, f"buildIsolated: agent '{name}' is not in agents/")
+        for key in self.cfg.get("examplesExempt", []):
+            kind, _, name = key.partition(":")
+            if kind == "agent" and name not in agents:
+                self.err(cfg_path, f"examplesExempt: agent '{name}' is not in agents/")
+            elif kind == "rule" and not (self.root / "rules" / f"{name}.md").is_file():
+                self.err(cfg_path, f"examplesExempt: rule '{name}' is not in rules/")
+            elif kind not in ("agent", "rule"):
+                self.err(cfg_path, f"examplesExempt: unknown key '{key}'")
+        for name in self.cfg.get("useWhenExempt", []):
+            if name not in skills:
+                self.err(cfg_path, f"useWhenExempt: skill '{name}' has no skills/{name}/SKILL.md")
+
     def run(self) -> list[str]:
         models = json.loads((self.root / "agent-models.json").read_text(encoding="utf-8")).get("agents", {})
         self.check_core()
@@ -351,6 +374,7 @@ class Validator:
         self.check_templates()
         self.check_commands()
         self.check_agent_skills()
+        self.check_exemptions()
         return self.errors
 
 
