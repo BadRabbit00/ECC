@@ -73,7 +73,7 @@ pkgs.writeShellApplication {
 - `writeShellApplication` over `writeShellScriptBin`: `set -euo pipefail` and shellcheck for free.
 - `makeWrapper` / `wrapProgram $out/bin/x --prefix PATH : ${lib.makeBinPath [ a b ]} --set VAR value` in `postFixup` for binaries that need env.
 - `symlinkJoin { name; paths = [ … ]; }` to compose several packages into one output.
-- Restrict what a wrapper may execute (as `ecc-run` does): `case "$script" in ${root}/*) …;; *) exit 64;; esac`.
+- Restrict what a wrapper may execute (as `br-hook` does with its entry grammar): `case "$script" in ${root}/*) …;; *) exit 64;; esac`.
 
 ## checkPhase and reproducibility
 
