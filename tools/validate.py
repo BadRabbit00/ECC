@@ -145,7 +145,10 @@ def fence_tags(body: str) -> tuple[list[str], bool]:
 class Validator:
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.cfg = json.loads((root / "tools" / "validate.json").read_text(encoding="utf-8"))
+        cfg = json.loads((root / "tools" / "validate.json").read_text(encoding="utf-8"))
+        if not isinstance(cfg, dict):
+            raise TypeError("tools/validate.json: top level must be an object")
+        self.cfg = cfg
         self.errors: list[str] = []
         self.rule_ids: dict[str, Path] = {}
         self._cache: dict[Path, str | None] = {}
@@ -240,7 +243,7 @@ class Validator:
             names.append(name)
             if name != p.stem:
                 self.err(p, f"name '{name}' != file name '{p.stem}'")
-            desc = scalar(fm.get("description"))
+            desc = scalar(fm.get("description")).strip()
             if not desc:
                 self.err(p, "description missing")
             # buildIsolated agents get isolation fields from nix/payload.py at build time.
@@ -518,7 +521,7 @@ def main() -> int:
     args = ap.parse_args()
     try:
         errors = Validator(args.root.resolve()).run()
-    except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         print(f"validate: internal error: {exc}", file=sys.stderr)
         return 2
     for e in errors:

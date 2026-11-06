@@ -27,9 +27,7 @@ NIX_AGENT_SKILLS = {
     "nix-build-resolver": ["nix-debugging"],
     "nix-test-runner": ["nix-testing"],
 }
-REQUIRED_DISALLOWED = ["Agent", "Skill", "mcp__*"]
 CONTRACT_HEADING = "## Contract (all br subagents)"
-STYLE_MARKER = "BR-ORCHESTRATOR-STYLE-ACTIVE"
 
 errors: list[str] = []
 
@@ -114,6 +112,8 @@ def main() -> int:
     # Effort values and the PROACTIVELY sentence are defined once, in the validator's config.
     cfg = json.loads((br / "tools" / "validate.json").read_text(encoding="utf-8"))
     allowed_effort = cfg["allowedEffort"]
+    required_disallowed = cfg["requiredDisallowed"]
+    style_marker = cfg["styleMarker"]
     proactive = re.compile(cfg["proactivelyPattern"])
 
     # --- 1–3: agents -----------------------------------------------------------------------------
@@ -143,7 +143,7 @@ def main() -> int:
         fm = put(fm, "effort", effort)
         fm = put(fm, "omitClaudeMd", "true")
         dis = as_list(get(fm, "disallowedTools"))
-        fm = put(fm, "disallowedTools", ", ".join(dis + [t for t in REQUIRED_DISALLOWED if t not in dis]))
+        fm = put(fm, "disallowedTools", ", ".join(dis + [t for t in required_disallowed if t not in dis]))
         if get(fm, "maxTurns") is None:
             fm = put(fm, "maxTurns", "40")
         if get(fm, "tools") is None:
@@ -191,7 +191,7 @@ def main() -> int:
         for s in as_list(get(fm, "skills")):
             if not (claude / "skills" / s / "SKILL.md").is_file():
                 fail(f"{p.name}: preloaded skill '{s}' is not in the output")
-    hits = [str(f.relative_to(out)) for f in out.rglob("*") if f.is_file() and STYLE_MARKER in f.read_text(encoding="utf-8", errors="ignore")]
+    hits = [str(f.relative_to(out)) for f in out.rglob("*") if f.is_file() and style_marker in f.read_text(encoding="utf-8", errors="ignore")]
     if hits != ["claude/output-styles/orchestrator.md"]:
         fail(f"style marker found in {hits}; expected only claude/output-styles/orchestrator.md")
 

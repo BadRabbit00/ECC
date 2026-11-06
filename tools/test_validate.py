@@ -337,7 +337,7 @@ Why: injection.
         self.write_agent(GOOD_AGENT + "\n```text\n")
         self.assertTrue(any("unclosed code fence" in e for e in self.run_validator()))
 
-    # -- nix/payload.py (not in the build's source fileset, so these only run from a checkout/devShell)
+    # -- nix/payload.py
 
     def run_payload(self, agent_text: str) -> subprocess.CompletedProcess[str]:
         """Runs payload.py on a copy of the tree with one extra agent; returns the finished process."""
@@ -352,7 +352,6 @@ Why: injection.
             capture_output=True, text=True, check=False,
         )
 
-    @unittest.skipUnless(PAYLOAD.is_file(), "nix/payload.py is not in the source tree")
     def test_payload_rejects_block_list(self) -> None:
         block = GOOD_AGENT.replace("disallowedTools: Agent, Skill, mcp__*", "disallowedTools:\n  - Bash")
         proc = self.run_payload(block)
@@ -360,7 +359,6 @@ Why: injection.
         self.assertIn("demo-agent: block-style list for 'disallowedTools' is not supported", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
-    @unittest.skipUnless(PAYLOAD.is_file(), "nix/payload.py is not in the source tree")
     def test_payload_reports_missing_frontmatter_without_traceback(self) -> None:
         proc = self.run_payload("# no frontmatter\n")
         self.assertEqual(proc.returncode, 1, proc.stderr)
