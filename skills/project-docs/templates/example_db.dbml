@@ -1,0 +1,46 @@
+// Sample schema for dbdiagram.io.
+// File name = database name: orders_db → orders_db.dbml. Rename this file.
+// One database = one .dbml. Types, keys and indexes live here.
+// Table and field meaning lives in DATABASE.md; only short notes here.
+
+Project orders_db {
+  database_type: 'PostgreSQL'
+  Note: 'Orders and users. Owner: svc-orders'
+}
+
+Enum order_status {
+  new
+  paid
+  shipped
+  cancelled
+}
+
+Table users {
+  id uuid [pk]
+  email varchar(255) [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table orders {
+  id uuid [pk]
+  user_id uuid [not null, ref: > users.id]
+  status order_status [not null, default: 'new']
+  total_minor bigint [not null, note: 'amount in minor currency units']
+  created_at timestamptz [not null, default: `now()`]
+  deleted_at timestamptz [null, note: 'soft delete']
+
+  indexes {
+    (user_id, created_at) [name: 'ix_orders_user_created']
+    status
+  }
+}
+
+Table order_items {
+  id uuid [pk]
+  order_id uuid [not null]
+  sku varchar(64) [not null]
+  qty int [not null, note: 'qty > 0']
+}
+
+// A relation can also be declared separately — clearer for 1:N with cascade
+Ref: order_items.order_id > orders.id [delete: cascade]
