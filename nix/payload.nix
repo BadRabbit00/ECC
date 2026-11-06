@@ -12,8 +12,8 @@
 }:
 let
   root = ../.;
-  # Only the installed directories plus tools/ for checkPhase: editing nix/, README or .plan
-  # does not rebuild the payload.
+  # Only the installed directories, tools/ for checkPhase and nix/payload.py for its tests: editing
+  # the other nix/ files, README or .plan does not rebuild the payload.
   src = lib.fileset.toSource {
     inherit root;
     fileset = lib.fileset.unions [
@@ -26,6 +26,8 @@ let
       ../templates
       ../hooks
       ../tools
+      # payload.py itself: tools/test_validate.py runs it in subprocess tests.
+      ../nix/payload.py
       ../agent-models.json
       ../settings.fragment.json
       ../LICENSE
