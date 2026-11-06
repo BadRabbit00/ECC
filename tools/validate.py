@@ -6,8 +6,8 @@ Usage:
 
 root  repository root; defaults to the parent of tools/.
 
-Exit code 0 = clean, 1 = violations (printed one per line).
-Standard library only; runs inside the payload build.
+Exit code 0 = clean, 1 = violations (printed one per line), 2 = internal error
+(unreadable root or config). Standard library only; runs inside the payload build.
 """
 from __future__ import annotations
 
@@ -18,44 +18,68 @@ import sys
 from pathlib import Path
 
 CONTENT_DIRS = ("agents", "rules", "skills", "commands", "core", "templates", "hooks")
-FENCE = re.compile(r"^```", re.M)
 RULE_HEADING = re.compile(r"^###\s+(R-[A-Z0-9]+(?:-[A-Z0-9]+)+)\b", re.M)
+# Applied to one section at a time (see check_examples), so a Bad: of one rule can never
+# pair with a Good: of the next.
 PAIR = re.compile(r"^Bad:\s*\n```[^\n]*\n.*?\n```.*?^Good:\s*\n```[^\n]*\n.*?\n```", re.M | re.S)
+HEADING = re.compile(r"#{1,3}\s")
+BLOCK_KEY = re.compile(r"([A-Za-z_][\w-]*):\s*$")
 
 
 # ---------------------------------------------------------------- frontmatter
 
-def split_frontmatter(text: str) -> tuple[dict[str, object], str] | None:
+def raw_frontmatter(text: str) -> tuple[str, str] | None:
     if not text.startswith("---\n"):
         return None
     end = text.find("\n---", 4)
     if end == -1:
         return None
-    raw = text[4:end]
-    body = text[end + 4:].lstrip("\n")
-    return parse_yaml_subset(raw), body
+    return text[4:end], text[end + 4:].lstrip("\n")
+
+
+def split_frontmatter(text: str) -> tuple[dict[str, object], str] | None:
+    parts = raw_frontmatter(text)
+    if parts is None:
+        return None
+    return parse_yaml_subset(parts[0]), parts[1]
+
+
+def block_list_keys(raw: str) -> list[str]:
+    """Keys written as `key:` followed by an indented or `- ` line. nix/payload.py cannot edit
+    such lists, so agents must use the inline form."""
+    lines = raw.splitlines()
+    keys = []
+    for i, line in enumerate(lines[:-1]):
+        m = BLOCK_KEY.fullmatch(line)
+        if m and lines[i + 1].startswith((" ", "\t", "- ")):
+            keys.append(m.group(1))
+    return keys
 
 
 def parse_yaml_subset(raw: str) -> dict[str, object]:
     """Parses the flat YAML we use: `key: value`, `key: [a, b]`, and `key:` + `  - item` lists.
-    Lines starting with '#' are comments."""
+    An empty `key:` is "" until a list item follows. Lines starting with '#' are comments."""
     data: dict[str, object] = {}
-    current_list: list[str] | None = None
+    current_key: str | None = None
     for line in raw.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if line.startswith(("  - ", "- ")) and current_list is not None:
-            current_list.append(unquote(line.split("- ", 1)[1].strip()))
+        if line.startswith(("  - ", "- ")) and current_key is not None:
+            items = data[current_key]
+            if not isinstance(items, list):
+                items = []
+                data[current_key] = items
+            items.append(unquote(line.split("- ", 1)[1].strip()))
             continue
         if ":" not in line:
             continue
         key, value = line.split(":", 1)
         key, value = key.strip(), value.strip()
         if value == "":
-            current_list = []
-            data[key] = current_list
+            data[key] = ""
+            current_key = key
             continue
-        current_list = None
+        current_key = None
         if value.startswith("[") and value.endswith("]"):
             data[key] = [unquote(v.strip()) for v in value[1:-1].split(",") if v.strip()]
         elif value in ("true", "false"):
@@ -73,12 +97,47 @@ def unquote(v: str) -> str:
     return v
 
 
+def scalar(v: object) -> str:
+    """Text of a scalar value; lists and missing values are "" so 'missing' checks fire."""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, (bool, int)):
+        return str(v)
+    return ""
+
+
 def as_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(v) for v in value]
     if isinstance(value, str):
         return [v.strip() for v in value.split(",") if v.strip()]
     return []
+
+
+def sections(body: str) -> list[str]:
+    """Body split at headings (levels 1-3) that sit outside code fences: a markdown example
+    inside a fence may contain `### ` lines of its own."""
+    out: list[list[str]] = [[]]
+    is_open = False
+    for line in body.splitlines(keepends=True):
+        if line.startswith("```"):
+            is_open = not is_open
+        elif not is_open and HEADING.match(line):
+            out.append([])
+        out[-1].append(line)
+    return ["".join(chunk) for chunk in out]
+
+
+def fence_tags(body: str) -> tuple[list[str], bool]:
+    """Language tags of opening fences, and whether the last fence is left open."""
+    tags: list[str] = []
+    is_open = False
+    for line in body.splitlines():
+        if line.startswith("```"):
+            if not is_open:
+                tags.append(line[3:].strip())
+            is_open = not is_open
+    return tags, is_open
 
 
 # ---------------------------------------------------------------- checks
@@ -89,23 +148,35 @@ class Validator:
         self.cfg = json.loads((root / "tools" / "validate.json").read_text(encoding="utf-8"))
         self.errors: list[str] = []
         self.rule_ids: dict[str, Path] = {}
+        self._cache: dict[Path, str | None] = {}
 
     def err(self, path: Path, msg: str) -> None:
         self.errors.append(f"{path.relative_to(self.root)}: {msg}")
 
     # -- helpers
     def lines(self, text: str) -> int:
-        return text.count("\n") + 1
+        return len(text.splitlines())
 
     def check_examples(self, path: Path, body: str, key: str) -> None:
         if key in self.cfg.get("examplesExempt", []):
             return
-        if not PAIR.search(body):
-            self.err(path, "no example pair (Bad: + code block, then Good: + code block)")
-        for block in re.findall(r"^```([^\n]*)\n", body, re.M)[::2]:
-            if not block.strip():
-                self.err(path, "code block without a language tag")
-                break
+        hint = "(Bad: + code block, then Good: + code block)"
+        rules = []
+        for section in sections(body):
+            m = RULE_HEADING.match(section)
+            if m:
+                rules.append((m.group(1), section))
+        if rules:
+            for rid, section in rules:
+                if not PAIR.search(section):
+                    self.err(path, f"rule {rid}: no example pair {hint}")
+        elif not PAIR.search(body):
+            self.err(path, f"no example pair {hint}")
+        tags, still_open = fence_tags(body)
+        if still_open:
+            self.err(path, "unclosed code fence")
+        if any(not tag for tag in tags):
+            self.err(path, "code block without a language tag")
 
     def collect_rule_ids(self, path: Path, body: str) -> None:
         for rid in RULE_HEADING.findall(body):
@@ -120,10 +191,21 @@ class Validator:
         if b"\r\n" in raw:
             self.err(path, "CRLF line endings")
 
-    def read(self, path: Path) -> str:
+    def read(self, path: Path) -> str | None:
+        """Text with BOM and CRLF already reported and normalised away, so one defect yields one
+        error. None means the file is not UTF-8; callers skip it. Cached: every file is reported once."""
+        if path in self._cache:
+            return self._cache[path]
         raw = path.read_bytes()
         self.check_encoding(path, raw)
-        return raw.decode("utf-8")
+        text: str | None
+        try:
+            text = raw.decode("utf-8").removeprefix("﻿").replace("\r\n", "\n")
+        except UnicodeDecodeError:
+            self.err(path, "not UTF-8")
+            text = None
+        self._cache[path] = text
+        return text
 
     # -- sections
     def check_core(self) -> None:
@@ -133,34 +215,42 @@ class Validator:
             if not p.exists():
                 self.err(p, "missing")
                 continue
-            n = self.lines(self.read(p))
-            if n > limits[key]:
-                self.err(p, f"{n} lines > limit {limits[key]}")
+            text = self.read(p)
+            if text is None:
+                continue
+            count = self.lines(text)
+            if count > limits[key]:
+                self.err(p, f"{count} lines > limit {limits[key]}")
 
     def check_agents(self, models: dict[str, object]) -> list[str]:
         names = []
         for p in sorted((self.root / "agents").glob("*.md")):
             text = self.read(p)
+            if text is None:
+                continue
             parsed = split_frontmatter(text)
             if parsed is None:
                 self.err(p, "no YAML frontmatter")
                 continue
             fm, body = parsed
-            name = str(fm.get("name", ""))
+            raw = raw_frontmatter(text)
+            for key in block_list_keys(raw[0] if raw else ""):
+                self.err(p, f"block-style list for '{key}' is not supported; use inline [a, b]")
+            name = scalar(fm.get("name"))
             names.append(name)
             if name != p.stem:
                 self.err(p, f"name '{name}' != file name '{p.stem}'")
-            desc = str(fm.get("description", ""))
+            desc = scalar(fm.get("description"))
             if not desc:
                 self.err(p, "description missing")
             # buildIsolated agents get isolation fields from nix/payload.py at build time.
             built = name in self.cfg.get("buildIsolated", [])
             checked = desc
             if built:
-                # Same substitution as nix/payload.py: the build strips this sentence.
-                checked = re.sub(r"\s*Use PROACTIVELY[^.]*\.", "", desc)
+                # Same substitution as nix/payload.py (one pattern in validate.json): the build strips this sentence.
+                checked = re.sub(self.cfg["proactivelyPattern"], "", desc)
             for word in self.cfg["forbiddenDescriptionWords"]:
-                if word in checked.lower():
+                if word.lower() in checked.lower():
                     self.err(p, f"description contains '{word}' (would make Claude auto-invoke)")
             if not built and fm.get("omitClaudeMd") is not True:
                 self.err(p, "omitClaudeMd: true is required")
@@ -175,13 +265,13 @@ class Validator:
                         self.err(p, f"disallowedTools must include {t}")
                 if not isinstance(fm.get("maxTurns"), int):
                     self.err(p, "maxTurns (integer) is required")
-            if str(fm.get("model", "")) not in self.cfg["allowedModels"]:
+            if scalar(fm.get("model")) not in self.cfg["allowedModels"]:
                 self.err(p, f"model must be one of {self.cfg['allowedModels']}")
-            if "effort" in fm and str(fm["effort"]) not in self.cfg["allowedEffort"]:
+            if "effort" in fm and scalar(fm["effort"]) not in self.cfg["allowedEffort"]:
                 self.err(p, f"effort must be one of {self.cfg['allowedEffort']}")
-            n = self.lines(body)
-            if n > self.cfg["limits"]["agent"]:
-                self.err(p, f"body {n} lines > limit {self.cfg['limits']['agent']}")
+            count = self.lines(body)
+            if count > self.cfg["limits"]["agent"]:
+                self.err(p, f"body {count} lines > limit {self.cfg['limits']['agent']}")
             if not built and "## Output" not in body:
                 self.err(p, "missing '## Output' section")
             self.check_examples(p, body, f"agent:{name}")
@@ -193,51 +283,59 @@ class Validator:
     def check_rules(self) -> None:
         for p in sorted((self.root / "rules").glob("*.md")):
             text = self.read(p)
+            if text is None:
+                continue
             parsed = split_frontmatter(text)
             if parsed is None or not as_list(parsed[0].get("paths")):
                 self.err(p, "path rule needs a non-empty 'paths:' list in frontmatter")
                 continue
             body = parsed[1]
-            n = self.lines(body)
-            if n > self.cfg["limits"]["rule"]:
-                self.err(p, f"{n} lines > limit {self.cfg['limits']['rule']}")
+            count = self.lines(body)
+            if count > self.cfg["limits"]["rule"]:
+                self.err(p, f"{count} lines > limit {self.cfg['limits']['rule']}")
             self.check_examples(p, body, f"rule:{p.stem}")
             self.collect_rule_ids(p, body)
 
     def check_skills(self) -> None:
         for p in sorted((self.root / "skills").glob("*/SKILL.md")):
-            parsed = split_frontmatter(self.read(p))
+            text = self.read(p)
+            if text is None:
+                continue
+            parsed = split_frontmatter(text)
             if parsed is None:
                 self.err(p, "no YAML frontmatter")
                 continue
             fm, body = parsed
-            if fm.get("name") != p.parent.name:
+            if scalar(fm.get("name")) != p.parent.name:
                 self.err(p, f"name must equal directory '{p.parent.name}'")
             if p.parent.name not in self.cfg.get("useWhenExempt", []) \
-                    and not str(fm.get("description", "")).startswith("Use when"):
+                    and not scalar(fm.get("description")).startswith("Use when"):
                 self.err(p, "description must start with 'Use when'")
             self.collect_rule_ids(p, body)
 
     def check_output_styles(self) -> None:
         for p in sorted((self.root / "output-styles").glob("*.md")):
             text = self.read(p)
+            if text is None:
+                continue
             parsed = split_frontmatter(text)
-            if parsed is None or not parsed[0].get("name"):
+            if parsed is None or not scalar(parsed[0].get("name")):
                 self.err(p, "output style needs frontmatter with name")
                 continue
             fm, body = parsed
             if fm.get("keep-coding-instructions") is not True:
                 self.err(p, "keep-coding-instructions: true is required")
-            n = self.lines(body)
-            if n > self.cfg["limits"]["outputStyle"]:
-                self.err(p, f"body {n} lines > limit {self.cfg['limits']['outputStyle']}")
+            count = self.lines(body)
+            if count > self.cfg["limits"]["outputStyle"]:
+                self.err(p, f"body {count} lines > limit {self.cfg['limits']['outputStyle']}")
             if p.stem == "orchestrator" and self.cfg["styleMarker"] not in body:
                 self.err(p, f"missing marker {self.cfg['styleMarker']}")
         marker = self.cfg["styleMarker"]
-        # Only the installed content is scanned: README, .plan and nix/ may name the marker.
+        # Only the installed content is scanned (output-styles/ is not in CONTENT_DIRS): README,
+        # .plan and nix/ may name the marker.
         scanned = [d for d in CONTENT_DIRS if (self.root / d).is_dir()]
         for p in sorted(f for d in scanned for f in (self.root / d).rglob("*")):
-            if p.is_file() and p.suffix in {".md", ".html", ".json"} and p.parent.name != "output-styles" \
+            if p.is_file() and p.suffix in {".md", ".html", ".json"} \
                     and marker in p.read_text(encoding="utf-8", errors="replace"):
                 self.err(p, f"{marker} leaks outside output-styles/")
 
@@ -246,22 +344,26 @@ class Validator:
         slides, blank = t / "slides.html", t / "slides.blank.html"
         if slides.exists():
             full = self.read(slides)
-            if full.count("<!-- SLIDES:BEGIN") != 1 or full.count("<!-- SLIDES:END -->") != 1:
+            if full is None:
+                pass
+            elif full.count("<!-- SLIDES:BEGIN") != 1 or full.count("<!-- SLIDES:END -->") != 1:
                 self.err(slides, "needs exactly one SLIDES:BEGIN … SLIDES:END block")
             elif not blank.exists():
                 self.err(blank, "missing (generate it from slides.html)")
             else:
                 expected = re.sub(r"<!-- SLIDES:BEGIN.*?<!-- SLIDES:END -->", "<!-- SLIDES -->", full, flags=re.S)
-                if self.read(blank) != expected:
+                blank_text = self.read(blank)
+                if blank_text is not None and blank_text != expected:
                     self.err(blank, "out of sync with slides.html (regenerate: block → <!-- SLIDES -->)")
         plan = t / "PLAN.md"
         if plan.exists():
             text = self.read(plan)
-            if not re.search(r"^### T1 — ", text, re.M):
-                self.err(plan, "needs a task card heading '### T1 — …' (hooks parse it)")
-            for field in ("**Status:**", "**Writes (exclusive):**", "**Tests (test-writer):**"):
-                if field not in text:
-                    self.err(plan, f"task card field {field} missing (hooks parse it)")
+            if text is not None:
+                if not re.search(r"^### T1 — ", text, re.M):
+                    self.err(plan, "needs a task card heading '### T1 — …' (hooks parse it)")
+                for field in ("**Status:**", "**Writes (exclusive):**", "**Tests (test-writer):**"):
+                    if field not in text:
+                        self.err(plan, f"task card field {field} missing (hooks parse it)")
         docs = self.root / "skills" / "project-docs" / "templates"
         if docs.parent.exists():
             for name in self.cfg["docTemplates"]:
@@ -272,10 +374,12 @@ class Validator:
         s = self.root / "settings.fragment.json"
         try:
             settings = json.loads(s.read_text(encoding="utf-8"))
-            if settings.get("env", {}).get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
+        except (OSError, ValueError) as exc:
+            self.err(s, f"invalid: {exc}")
+        else:
+            env = settings.get("env") if isinstance(settings, dict) else None
+            if not isinstance(env, dict) or env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
                 self.err(s, "env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH must be \"1\"")
-        except (OSError, json.JSONDecodeError) as e:
-            self.err(s, f"invalid: {e}")
         m = self.root / "agent-models.json"
         for name, spec in models.items():
             if name not in agent_names:
@@ -293,25 +397,42 @@ class Validator:
             return
         try:
             data = json.loads(h.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            self.err(h, f"invalid: {e}")
+        except ValueError as exc:
+            self.err(h, f"invalid: {exc}")
+            return
+        by_event = data.get("hooks") or {} if isinstance(data, dict) else None
+        if not isinstance(by_event, dict):
+            self.err(h, "top level must be an object with a 'hooks' object")
             return
         seen: set[str] = set()
         used: set[str] = set()
-        for event, entries in (data.get("hooks") or {}).items():
+        for event, entries in by_event.items():
             if event not in self.cfg["hookEvents"]:
                 self.err(h, f"unknown hook event {event}")
-            for e in entries:
-                hid = e.get("id", "")
+            if not isinstance(entries, list):
+                self.err(h, f"{event}: must be a list")
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    self.err(h, f"{event}: every entry must be an object")
+                    continue
+                hid = scalar(entry.get("id"))
                 if not hid.startswith("br:"):
                     self.err(h, f"{event}: id must start with 'br:' ({hid or 'missing'})")
                 if hid in seen:
                     self.err(h, f"duplicate hook id {hid}")
                 seen.add(hid)
-                if not e.get("description"):
+                if not entry.get("description"):
                     self.err(h, f"{hid}: description required")
-                for cmd in e.get("hooks", []):
-                    m = re.fullmatch(r"@BR_HOOK@ ([a-z_]+)", cmd.get("command", ""))
+                cmds = entry.get("hooks", [])
+                if not isinstance(cmds, list):
+                    self.err(h, f"{hid}: 'hooks' must be a list")
+                    continue
+                for cmd in cmds:
+                    if not isinstance(cmd, dict):
+                        self.err(h, f"{hid}: every hook must be an object")
+                        continue
+                    m = re.fullmatch(r"@BR_HOOK@ ([a-z_]+)", scalar(cmd.get("command")))
                     if not m:
                         self.err(h, f"{hid}: command must be '@BR_HOOK@ <entry>'")
                         continue
@@ -328,14 +449,18 @@ class Validator:
 
     def check_commands(self) -> None:
         for p in sorted((self.root / "commands").glob("*.md")):
-            parsed = split_frontmatter(self.read(p))
-            if parsed is None or not str(parsed[0].get("description", "")).strip():
+            text = self.read(p)
+            if text is None:
+                continue
+            parsed = split_frontmatter(text)
+            if parsed is None or not scalar(parsed[0].get("description")).strip():
                 self.err(p, "command needs frontmatter with description")
 
     def check_agent_skills(self) -> None:
         available = {p.parent.name for p in (self.root / "skills").glob("*/SKILL.md")}
         for p in sorted((self.root / "agents").glob("*.md")):
-            parsed = split_frontmatter(self.read(p))
+            text = self.read(p)
+            parsed = split_frontmatter(text) if text is not None else None
             if parsed is None:
                 continue
             for skill in as_list(parsed[0].get("skills")):
@@ -362,8 +487,17 @@ class Validator:
             if name not in skills:
                 self.err(cfg_path, f"useWhenExempt: skill '{name}' has no skills/{name}/SKILL.md")
 
+    def load_models(self) -> dict[str, object]:
+        path = self.root / "agent-models.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        agents = data.get("agents", {}) if isinstance(data, dict) else None
+        if not isinstance(agents, dict):
+            self.err(path, "must be an object with an 'agents' object")
+            return {}
+        return agents
+
     def run(self) -> list[str]:
-        models = json.loads((self.root / "agent-models.json").read_text(encoding="utf-8")).get("agents", {})
+        models = self.load_models()
         self.check_core()
         names = self.check_agents(models)
         self.check_rules()
@@ -382,7 +516,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("root", type=Path, nargs="?", default=Path(__file__).resolve().parent.parent)
     args = ap.parse_args()
-    errors = Validator(args.root.resolve()).run()
+    try:
+        errors = Validator(args.root.resolve()).run()
+    except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+        print(f"validate: internal error: {exc}", file=sys.stderr)
+        return 2
     for e in errors:
         print(e)
     print(f"validate: {len(errors)} problem(s)", file=sys.stderr)
