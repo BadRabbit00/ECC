@@ -1,6 +1,6 @@
-# br — orchestrator and subagents for Claude Code
+# warren — orchestrator and subagents for Claude Code
 
-br is a Claude Code configuration layer: one **orchestrator** output style for the main session and a
+warren is a Claude Code configuration layer: one **orchestrator** output style for the main session and a
 set of narrow, isolated **subagents** that do the actual work (research, tests, code, refactoring,
 review, slides), plus path-scoped rules, skills, Python hooks and templates. It is installed
 declaratively through Nix from the `nixos-conf` repository; nothing here is meant to be copied by hand.
@@ -132,19 +132,19 @@ the build if an agent or rule has no `Bad:`/`Good:` pair; exemptions live in `to
 Consumer (`nixos-conf`):
 
 ```nix
-inputs.br.url = "github:BadRabbit00/br";
+inputs.warren.url = "github:BadRabbit00/warren";
 # ...
-let br = inputs.br.lib.mk { inherit pkgs; };   # also accepts { inherit pkgs lib; }
+let warren = inputs.warren.lib.mk { inherit pkgs; };   # also accepts { inherit pkgs lib; }
 in {
-  # lay out br.payload/claude/* into ~/.claude, install core/CLAUDE.md as ~/.claude/CLAUDE.md,
-  # deep-merge br.payload/settings.fragment.json and merge br.payload/hooks.json by id into settings.json,
-  # put br.hook on PATH for the hooks
+  # lay out warren.payload/claude/* into ~/.claude, install core/CLAUDE.md as ~/.claude/CLAUDE.md,
+  # deep-merge warren.payload/settings.fragment.json and merge warren.payload/hooks.json by id into settings.json,
+  # put warren.hook on PATH for the hooks
 }
 ```
 
 ## From ECC
 
-br started as a rewrite inside a fork of **ECC — Everything Claude Code** by Affaan Mustafa
+warren (short internal code: `br`, for BadRabbit) started as a rewrite inside a fork of **ECC — Everything Claude Code** by Affaan Mustafa
 ([github.com/affaan-m/ecc](https://github.com/affaan-m/ecc), MIT). Since 0.1.0 this is a standalone
 repository and shares no code with ECC, except these 22 reference skills, copied unchanged under the MIT
 licence (see `LICENSE`):
@@ -159,4 +159,4 @@ licence (see `LICENSE`):
 
 Thank you, Affaan Mustafa and the ECC contributors. ECC showed what a disciplined agent toolkit for
 Claude Code can look like: agents with narrow jobs, skills as reusable knowledge, hooks as mechanical
-guardrails. br keeps that shape and the lessons; the implementation is our own.
+guardrails. warren keeps that shape and the lessons; the implementation is our own.
