@@ -1,5 +1,5 @@
-# br-hook <entry>: хуки br (hooks/*.py, только stdlib). Запиненный python, скрипты из своего
-# store-пути без тестов: правка тестов не пересобирает хук.
+# br-hook <entry>: br hooks (hooks/*.py, stdlib only). Pinned python, scripts run from their own
+# store path without tests: editing tests does not rebuild the hook.
 {
   lib,
   writeShellApplication,
@@ -20,19 +20,25 @@ let
 in
 writeShellApplication {
   name = "br-hook";
-  # git: guard-ы читают текущую ветку.
+  # git: the guards read the current branch.
   runtimeInputs = [
     python
     git
   ];
+  # Exit codes: 2 = wiring error (bad or missing entry), fail-CLOSED: a guard that silently
+  # disappears is worse than a visibly blocked tool call. Runtime crashes inside a hook exit 1
+  # and stay fail-open (the tool call proceeds), by design.
   text = ''
     entry=''${1:?usage: br-hook <entry>}
-    case "$entry" in
-      guard_*|check_*|fix_*) ;;
-      *) echo "br-hook: unknown entry $entry" >&2; exit 64 ;;
-    esac
-    # -I: без PYTHONPATH и user site; -B: стор только для чтения.
+    if [[ ! "$entry" =~ ^(guard|check|fix)_[a-z_]+$ ]] || [ ! -f ${hooks}/"$entry".py ]; then
+      echo "br-hook: unknown entry $entry" >&2
+      exit 2
+    fi
+    # -I: no PYTHONPATH or user site; -B: the store is read-only.
     exec python3 -I -B ${hooks}/"$entry".py
   '';
-  meta.mainProgram = "br-hook";
+  meta = {
+    description = "Runs a br hook entry (guard_*, check_*, fix_*) with a pinned python";
+    license = lib.licenses.mit;
+  };
 }

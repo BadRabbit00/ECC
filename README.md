@@ -123,9 +123,9 @@ the build if an agent or rule has no `Bad:`/`Good:` pair; exemptions live in `to
 
 | Output | What |
 |---|---|
-| `packages.br-payload` | `$out/claude/{CLAUDE.md,agents,skills,commands,rules/br,output-styles,br/templates}`, `$out/settings.fragment.json`, `$out/hooks.json`. The validator and the Python test suites run in `checkPhase`. |
+| `packages.br-payload` | `$out/claude/{CLAUDE.md,agents,skills,commands,rules/br,output-styles,br/templates}`, `$out/settings.fragment.json`, `$out/hooks.json`, `$out/LICENSE`. The validator and the Python test suites run in `checkPhase`; `installCheckPhase` runs `br-hook` once the way Claude Code does. |
 | `packages.br-hook` | `br-hook <entry>` wrapper for `hooks/*.py` with the pinned Python |
-| `lib.mk { pkgs }` | `{ payload, hook }` for consumers |
+| `lib.mk { pkgs, ... }` | `{ payload, hook, python }` for consumers; extra arguments such as `lib` are accepted and ignored |
 | `checks.payload` | the payload build |
 | `devShells.default` | Python, nixfmt, statix, deadnix |
 
@@ -134,7 +134,7 @@ Consumer (`nixos-conf`):
 ```nix
 inputs.br.url = "github:BadRabbit00/br";
 # ...
-let br = inputs.br.lib.mk { inherit pkgs; };
+let br = inputs.br.lib.mk { inherit pkgs; };   # also accepts { inherit pkgs lib; }
 in {
   # lay out br.payload/claude/* into ~/.claude, install core/CLAUDE.md as ~/.claude/CLAUDE.md,
   # deep-merge br.payload/settings.fragment.json and merge br.payload/hooks.json by id into settings.json,

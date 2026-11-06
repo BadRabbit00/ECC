@@ -1,7 +1,8 @@
-# Payload br. Выход:
+# br payload. Output:
 #   $out/claude/{CLAUDE.md,agents,skills,commands,rules/br,output-styles,br/templates}
-#   $out/settings.fragment.json   env + outputStyle, мерджится в ~/.claude/settings.json
-#   $out/hooks.json               br:* хуки с путём к запиненному br-hook
+#   $out/settings.fragment.json   env + outputStyle, merged into ~/.claude/settings.json
+#   $out/hooks.json               br:* hooks pointing at the pinned br-hook
+#   $out/LICENSE                  the payload ships MIT-licensed skills
 {
   lib,
   stdenvNoCC,
@@ -11,7 +12,8 @@
 }:
 let
   root = ../.;
-  # Только установленные каталоги и tools/ для checkPhase: правка nix/, README, .plan не пересобирает payload.
+  # Only the installed directories plus tools/ for checkPhase: editing nix/, README or .plan
+  # does not rebuild the payload.
   src = lib.fileset.toSource {
     inherit root;
     fileset = lib.fileset.unions [
@@ -26,22 +28,22 @@ let
       ../tools
       ../agent-models.json
       ../settings.fragment.json
+      ../LICENSE
     ];
   };
 in
 stdenvNoCC.mkDerivation {
   pname = "br-payload";
-  version = "0-unstable";
+  version = "0.1.0";
   inherit src;
 
   dontConfigure = true;
   dontBuild = true;
-  nativeBuildInputs = [
-    python
-    git
-  ];
+  nativeBuildInputs = [ python ];
+  # git: the hook tests create throwaway repositories.
+  nativeCheckInputs = [ git ];
 
-  # Валидатор и все Python-тесты бегут в сборке; красный тест роняет payload.
+  # The validator and every Python test run in the build; a red test fails the payload.
   doCheck = true;
   checkPhase = ''
     runHook preCheck
@@ -59,6 +61,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p "$c"/{agents,skills,commands,rules/br,output-styles,br/templates}
 
     cp core/CLAUDE.md "$c/CLAUDE.md"
+    cp LICENSE "$out/LICENSE"
     cp settings.fragment.json "$out/settings.fragment.json"
     cp output-styles/*.md "$c/output-styles/"
     cp rules/*.md "$c/rules/br/"
@@ -68,13 +71,28 @@ stdenvNoCC.mkDerivation {
     cp -r skills/. "$c/skills/"
     chmod -R u+w "$out"
 
-    # Фронтматтер, контракт, hooks.json и самопроверки.
+    # Frontmatter, contract, hooks.json and self-checks.
     python3 -I -B ${./payload.py} "$out" "$PWD" ${lib.getExe brHook}
     runHook postInstall
   '';
 
+  # Exercises the production path (python -I -B from the filtered store tree) once per build.
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+    rc=0
+    echo '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/tmp/x"},"cwd":"/tmp"}' \
+      | ${lib.getExe brHook} guard_read || rc=$?
+    if [ "$rc" -ne 0 ]; then echo "br-hook guard_read: expected rc 0, got $rc" >&2; exit 1; fi
+    rc=0
+    ${lib.getExe brHook} nope || rc=$?
+    if [ "$rc" -ne 2 ]; then echo "br-hook nope: expected rc 2, got $rc" >&2; exit 1; fi
+    runHook postInstallCheck
+  '';
+
   meta = {
     description = "br payload for Claude Code: orchestrator style, isolated agents, path rules, br hooks";
+    homepage = "https://github.com/BadRabbit00/br";
     license = lib.licenses.mit;
   };
 }

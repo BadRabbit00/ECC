@@ -1,7 +1,7 @@
-# mk { pkgs } -> { payload hook python }. Один вызов — одна и та же деривация для всех потребителей.
+# mk { pkgs } -> { payload hook python }. One call yields the same derivations for every consumer.
 { pkgs }:
 let
-  # Только stdlib: validate.py, хуки и тесты не тянут сторонних пакетов.
+  # Stdlib only: validate.py, hooks and tests need no third-party packages.
   python = pkgs.python3;
   hook = pkgs.callPackage ./hook.nix { inherit python; };
   payload = pkgs.callPackage ./payload.nix {

@@ -13,8 +13,8 @@
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
-      # Для потребителей с собственным nixpkgs: br.lib.mk { inherit pkgs; } -> { payload hook python }.
-      lib.mk = { pkgs }: import ./nix { inherit pkgs; };
+      # For consumers with their own nixpkgs: br.lib.mk { inherit pkgs; } -> { payload hook python }.
+      lib.mk = { pkgs, ... }: import ./nix { inherit pkgs; };
 
       packages = forAll (
         pkgs:
@@ -28,7 +28,7 @@
         }
       );
 
-      # Валидатор и все Python-тесты бегут в checkPhase payload: красный тест = красная сборка.
+      # The validator and all Python tests run in the payload checkPhase: a red test is a red build.
       checks = forAll (pkgs: {
         inherit (self.lib.mk { inherit pkgs; }) payload;
       });
