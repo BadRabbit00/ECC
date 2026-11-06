@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned Claude model + effort per agent installed by the br payload. Every br agent and every allowlisted fork agent must be listed, or the build fails. Aliases map: sonnet=claude-sonnet-5-5, opus=claude-opus-5-5, haiku=claude-haiku-5-5, fable=claude-fable-5-1.",
+  "$comment": "Pinned Claude model + effort per agent installed by the br payload. Every agent in agents/ must be listed, or the build fails. Aliases map: sonnet=claude-sonnet-5-5, opus=claude-opus-5-5, haiku=claude-haiku-5-5, fable=claude-fable-5-1.",
   "agents": {
     "presenter": {
       "model": "claude-sonnet-5-5",

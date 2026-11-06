@@ -4,7 +4,7 @@ paths:
 ---
 
 <!--
-TEMPLATE — copy to badrabbit/rules/<topic>.md, delete every comment.
+TEMPLATE — copy to rules/<topic>.md, delete every comment.
 
 A path rule loads into ANY session or subagent that touches a file matching `paths:`.
 So it must be short and universally true for those files. Budget: ≤ 120 lines.

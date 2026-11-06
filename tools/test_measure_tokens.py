@@ -1,4 +1,4 @@
-"""Tests for measure_tokens.py. Run from badrabbit/tools: python3 -m unittest test_measure_tokens"""
+"""Tests for measure_tokens.py. Run via: nix develop -c python3 -I -B -m unittest discover -s tools -p 'test_measure_tokens.py'"""
 from __future__ import annotations
 
 import io

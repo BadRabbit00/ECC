@@ -2,7 +2,7 @@
 
 Deterministic guards for the `br` flavour. Zero tokens until they fire; a denial reaches the model as a one-line reason prefixed `[br-hook]` that says what to do instead.
 
-Python standard library only. Run through the pinned wrapper `br-hook <entry>` (built in `nix/runtime.nix`), which `hooks.json` references as `@BR_HOOK@ <entry>`.
+Python standard library only. Run through the pinned wrapper `br-hook <entry>` (built in `nix/hook.nix`), which `hooks.json` references as `@BR_HOOK@ <entry>`.
 
 ## Entry points
 
@@ -78,9 +78,10 @@ The br flavour installs **none** of the 27 upstream hooks. Every hook is a proce
 
 - Bash checks read the command text. They catch mistakes, not a determined bypass (a script that writes into `tests/` passes). Backstops: sha256 of test files in PLAN evidence, code review.
 - A hook that crashes exits 1: Claude Code shows the error and the tool call proceeds (fail-open). The tests below are what keeps them correct.
+- An unknown or malformed entry name passed to `br-hook` exits 2 (fail-closed for PreToolUse); runtime errors inside a hook still exit 1 (fail-open) as before.
 
 ## Tests
 
 ```bash
-cd badrabbit/hooks && python3 -m unittest discover -s test -t test
+cd hooks && python3 -m unittest discover -s test -t test
 ```

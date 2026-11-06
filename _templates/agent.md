@@ -11,7 +11,7 @@ effort: medium
 ---
 
 <!--
-TEMPLATE — copy to badrabbit/agents/<name>.md, delete every comment.
+TEMPLATE — copy to agents/<name>.md, delete every comment.
 The payload injects core/subagent-contract.md right after the frontmatter,
 so do NOT repeat here: reporting format, language rules, "do not invent facts", nix develop -c.
 
